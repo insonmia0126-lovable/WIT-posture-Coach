@@ -1,0 +1,2 @@
+# DEMO GUI와 상태 전이 테스트는 표준 라이브러리만 사용합니다.
+# 카메라 모드는 requirements-camera.txt 를 설치하세요.

@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+models/*.task
+logs/
+requirements.lock.txt
+.DS_Store

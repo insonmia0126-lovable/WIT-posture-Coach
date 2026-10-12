@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>목격자 W.I.T v0.1</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="banner" class="banner demo">DEMO · 합성 입력으로 상태 판단 흐름을 시연합니다. 카메라 인식 정확도나 사용자 개선 결과가 아닙니다.</div>
+  <header>
+    <div>
+      <p class="kicker">W.I.T · 연구용 프로토타입 · 실측 성능 미검증</p>
+      <h1>목격자</h1>
+      <p class="lead">개인 기준에서 벗어난 자세가 <strong>지속될 때만</strong> 알리고, 알림 이후 <strong>회복을 확인</strong>합니다.</p>
+    </div>
+    <ul class="scope">
+      <li>포함: 기준 보정 · 지속 알림 · 회복 확인 · CSV</li>
+      <li>후속: 모바일 · 조도 · 눈 피로 · 정면 카메라</li>
+      <li>PC 온디바이스 v0.1 · 서버 추론 없음</li>
+    </ul>
+  </header>
+
+  <section id="state-card" class="state stable">
+    <div>
+      <p class="state-kicker">현재 상태</p>
+      <h2 id="state-name">기준 기록</h2>
+      <p id="reason">새 세션을 시작합니다.</p>
+    </div>
+    <dl class="metrics" id="metrics"></dl>
+  </section>
+
+  <section class="panel" id="hidden-a" hidden>
+    A조건: 교정 피드백이 화면에 없습니다. 내부 판단은 CSV에만 남습니다. A의 alerts는 전달한 알림이 아니라 내부 경고 조건 횟수입니다.
+  </section>
+
+  <section class="grid">
+    <article class="panel">
+      <h3>모의 입력</h3>
+      <label class="slider-label">귀–어깨 대리지표 각도 <span id="angle-readout">25°</span></label>
+      <input id="angle" type="range" min="0" max="70" value="25" />
+      <div class="row">
+        <label><input type="checkbox" id="occluded" /> 모의 가림</label>
+        <label><input type="checkbox" id="feedback" checked /> 교정 피드백 표시 (B)</label>
+      </div>
+      <div class="row actions">
+        <button id="preset-spike" type="button">짧은 변화 (50° 1초)</button>
+        <button id="preset-hold" type="button">지속 변화 (50° 유지)</button>
+        <button id="preset-base" type="button">기준 복귀 (25°)</button>
+      </div>
+      <p class="hint">90초 시연: 보정 → 짧은 움직임(알림 없음) → 6초 유지(알림) → 3초 복귀(회복) → 가림(중단, 회복 미집계) → CSV.</p>
+    </article>
+    <article class="panel">
+      <h3>실험용 설정</h3>
+      <ul class="params">
+        <li>기준 기록 <strong>5초</strong></li>
+        <li>이탈 임계 <strong>+12°</strong> (수직 대비 귀–어깨 선)</li>
+        <li>회복 범위 <strong>+8° 이하</strong></li>
+        <li>지속 알림 <strong>5초</strong></li>
+        <li>회복 유지 <strong>2초</strong></li>
+        <li>입력 공백 <strong>1.5초</strong> → 관찰 중단</li>
+      </ul>
+      <p class="hint">이 각도는 임상 CVA가 아닙니다. 어깨는 제7경추가 아니며, 촬영 각도와 몸통 움직임의 영향을 받습니다. 12°·5초는 동작 확인용 설계값입니다.</p>
+      <div class="row actions">
+        <button id="reset" type="button">새 세션</button>
+        <button id="save" type="button" class="primary">CSV 저장</button>
+      </div>
+      <p id="save-status" class="hint"></p>
+    </article>
+  </section>
+
+  <section class="panel timeline">
+    <h3>판단 흐름</h3>
+    <ol>
+      <li>카메라 또는 슬라이더 → 각도</li>
+      <li>개인 기준과 비교 (학습 모델이 알림을 결정하지 않음)</li>
+      <li>경계 구간에서 지속 타이머 초기화</li>
+      <li>+12°가 5초면 알림 → +8°가 2초면 회복</li>
+      <li>가림·저신뢰·공백은 측정 불가. 중단된 에피소드는 회복 성공이 아님</li>
+    </ol>
+  </section>
+
+  <footer>
+    중간발표용 v0.1 · 상태 전이 테스트는 <code>python -m unittest tests.test_state_machine -v</code> · 데스크톱 GUI는 <code>python -m wit.app</code>
+  </footer>
+  <script src="/app.js"></script>
+</body>
+</html>
