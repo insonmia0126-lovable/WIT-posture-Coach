@@ -37,6 +37,8 @@ let lastVideoTime = -1;
 let cameraAngle = 25;
 let cameraOccluded = false;
 let rafId = 0;
+let spikeTimer = 0;
+let tickInFlight = false;
 
 function nowS() {
   return (performance.now() - t0) / 1000;
@@ -106,6 +108,8 @@ function render(snap) {
 }
 
 async function resetSession(demo = !cameraOn) {
+  clearTimeout(spikeTimer);
+  spikeTimer = 0;
   t0 = performance.now();
   if (demo) {
     angle.value = 25;
@@ -119,14 +123,27 @@ async function resetSession(demo = !cameraOn) {
   render(snap);
 }
 
+function setAngle(value) {
+  clearTimeout(spikeTimer);
+  spikeTimer = 0;
+  angle.value = String(value);
+  angleReadout.textContent = `${value}°`;
+}
+
 async function tick() {
-  const snap = await post("/api/step", {
-    t: nowS(),
-    angle_deg: cameraOn ? cameraAngle : Number(angle.value),
-    occluded: cameraOn ? cameraOccluded : occluded.checked,
-    demo: !cameraOn,
-  });
-  render(snap);
+  if (tickInFlight) return;
+  tickInFlight = true;
+  try {
+    const snap = await post("/api/step", {
+      t: nowS(),
+      angle_deg: cameraOn ? cameraAngle : Number(angle.value),
+      occluded: cameraOn ? cameraOccluded : occluded.checked,
+      demo: !cameraOn,
+    });
+    render(snap);
+  } finally {
+    tickInFlight = false;
+  }
 }
 
 function setCamUi(on, message) {
@@ -254,24 +271,20 @@ function stopCamera() {
 }
 
 angle.addEventListener("input", () => {
+  clearTimeout(spikeTimer);
+  spikeTimer = 0;
   angleReadout.textContent = `${angle.value}°`;
 });
 feedback.addEventListener("change", () => resetSession(!cameraOn));
 document.getElementById("reset").addEventListener("click", () => resetSession(!cameraOn));
-document.getElementById("preset-base").addEventListener("click", () => {
-  angle.value = 25;
-  angleReadout.textContent = "25°";
-});
-document.getElementById("preset-hold").addEventListener("click", () => {
-  angle.value = 50;
-  angleReadout.textContent = "50°";
-});
-document.getElementById("preset-spike").addEventListener("click", async () => {
-  angle.value = 50;
-  angleReadout.textContent = "50°";
-  setTimeout(() => {
-    angle.value = 25;
+document.getElementById("preset-base").addEventListener("click", () => setAngle(25));
+document.getElementById("preset-hold").addEventListener("click", () => setAngle(50));
+document.getElementById("preset-spike").addEventListener("click", () => {
+  setAngle(50);
+  spikeTimer = window.setTimeout(() => {
+    angle.value = "25";
     angleReadout.textContent = "25°";
+    spikeTimer = 0;
   }, 1000);
 });
 document.getElementById("save").addEventListener("click", async () => {

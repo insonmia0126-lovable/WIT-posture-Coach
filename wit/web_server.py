@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
@@ -21,33 +22,37 @@ LOG_DIR = ROOT / "logs"
 
 class SessionHub:
     def __init__(self) -> None:
+        self._lock = threading.Lock()
         self.engine = CoachEngine(config=EngineConfig(), demo=True, feedback_enabled=True)
         self.logger = SessionLogger(LOG_DIR / "web_session.csv")
         self.engine.start_session(0.0)
 
     def reset(self, demo: bool, feedback: bool) -> dict:
-        self.engine = CoachEngine(config=EngineConfig(), demo=demo, feedback_enabled=feedback)
-        self.logger = SessionLogger(LOG_DIR / "web_session.csv")
-        snap = self.engine.start_session(0.0)
-        return self._pack(snap)
+        with self._lock:
+            self.engine = CoachEngine(config=EngineConfig(), demo=demo, feedback_enabled=feedback)
+            self.logger = SessionLogger(LOG_DIR / "web_session.csv")
+            snap = self.engine.start_session(0.0)
+            return self._pack(snap)
 
     def step(self, payload: dict) -> dict:
-        snap = self.engine.feed(
-            Sample(
-                t=float(payload.get("t", 0.0)),
-                angle_deg=float(payload.get("angle_deg", 25.0)),
-                visibility=float(payload.get("visibility", 1.0)),
-                occluded=bool(payload.get("occluded", False)),
+        with self._lock:
+            snap = self.engine.feed(
+                Sample(
+                    t=float(payload.get("t", 0.0)),
+                    angle_deg=float(payload.get("angle_deg", 25.0)),
+                    visibility=float(payload.get("visibility", 1.0)),
+                    occluded=bool(payload.get("occluded", False)),
+                )
             )
-        )
-        self.engine.demo = bool(payload.get("demo", True))
-        self.logger.append(snap)
-        return self._pack(snap)
+            self.engine.demo = bool(payload.get("demo", True))
+            self.logger.append(snap)
+            return self._pack(snap)
 
     def save_csv(self) -> dict:
-        LOG_DIR.mkdir(parents=True, exist_ok=True)
-        path = self.logger.save(LOG_DIR / "web_session.csv")
-        return {"path": str(path), "rows": len(self.logger.rows), "headers": HEADERS}
+        with self._lock:
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            path = self.logger.save(LOG_DIR / "web_session.csv")
+            return {"path": str(path), "rows": len(self.logger.rows), "headers": HEADERS}
 
     def _pack(self, snap) -> dict:
         return {

@@ -128,6 +128,8 @@ class CoachEngine:
 
         if self.last_sample_t is not None:
             gap = sample.t - self.last_sample_t
+            if gap < 0:
+                return self.snapshot(self.last_sample_t)
             if gap > self.config.gap_timeout_s and self.state not in (
                 CoachState.CALIBRATING,
                 CoachState.IDLE,
