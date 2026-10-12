@@ -34,7 +34,9 @@ curl -L -o models/pose_landmarker_lite.task \
   "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task"
 ```
 
-앱에서 왼쪽/오른쪽 측면을 고르고 카메라를 시작합니다. 최초 패키지·모델 설치만 온라인이고, 실행 중 프레임 처리와 추론은 PC 내부입니다. `app.py`는 네트워크 호출과 영상 저장이 없습니다.
+**웹캠 모니터:** 측정 화면에 모습이 실시간으로 나옵니다. 브라우저에서는 [웹캠으로 측정]을 누르고 카메라 권한을 허용하세요. 데스크톱 GUI는 [카메라 시작]입니다. 미리보기 영상은 서버에 올리지 않고 저장하지 않습니다.
+
+앱에서 왼쪽/오른쪽 측면을 고르고 카메라를 시작합니다. 최초 패키지·모델 설치만 온라인이고, 실행 중 프레임 처리와 추론은 장치 내부입니다.
 
 ## 상태 전이
 

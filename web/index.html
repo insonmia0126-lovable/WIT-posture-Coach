@@ -21,6 +21,33 @@
     </ul>
   </header>
 
+  <section class="monitor-section">
+    <div class="monitor" id="monitor">
+      <div class="monitor-bezel">
+        <video id="cam" playsinline autoplay muted></video>
+        <canvas id="overlay"></canvas>
+        <div class="monitor-placeholder" id="cam-placeholder">
+          <strong>웹캠 모니터</strong>
+          <span>측정하는 동안 모습이 여기에 표시됩니다. 영상은 서버에 올리지 않고, 이 브라우저에서만 재생됩니다.</span>
+        </div>
+      </div>
+      <div class="monitor-bar">
+        <span id="cam-live" class="live-dot off">대기</span>
+        <span id="cam-status">웹캠으로 측정을 누르면 카메라 권한이 요청됩니다.</span>
+      </div>
+    </div>
+    <div class="monitor-actions">
+      <button id="start-cam" type="button" class="primary">웹캠으로 측정</button>
+      <button id="stop-cam" type="button">웹캠 끄기 · DEMO</button>
+      <label>측면
+        <select id="side">
+          <option value="left">왼쪽 (left)</option>
+          <option value="right">오른쪽 (right)</option>
+        </select>
+      </label>
+    </div>
+  </section>
+
   <section id="state-card" class="state stable">
     <div>
       <p class="state-kicker">현재 상태</p>

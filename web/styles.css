@@ -23,7 +23,74 @@ body {
 }
 .banner.demo { background: var(--demo); }
 .banner.camera { background: var(--cam); }
-header, footer, .panel, .state { margin: 1rem auto; max-width: 1080px; }
+header, footer, .panel, .state, .monitor-section { margin: 1rem auto; max-width: 1080px; }
+.monitor-section { padding: 0 1rem; }
+.monitor {
+  background: #020617;
+  border-radius: 18px;
+  border: 10px solid #1e293b;
+  box-shadow: 0 18px 50px rgb(0 0 0 / 35%);
+  overflow: hidden;
+}
+.monitor-bezel {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: #020617;
+}
+.monitor-bezel video, .monitor-bezel canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+.monitor-bezel canvas { pointer-events: none; }
+.monitor-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 0.6rem;
+  color: #94a3b8;
+  text-align: center;
+  padding: 1.5rem;
+  background:
+    linear-gradient(180deg, rgb(15 23 42 / 40%), rgb(2 6 23 / 80%)),
+    repeating-linear-gradient(90deg, #0b1220 0 24px, #111827 24px 48px);
+}
+.monitor-placeholder strong { color: #e2e8f0; font-size: 1.3rem; }
+.monitor-placeholder span { max-width: 28rem; line-height: 1.5; }
+.monitor.live .monitor-placeholder { display: none; }
+.monitor-bar {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.55rem 0.9rem;
+  background: #0f172a;
+  color: #cbd5e1;
+  font-size: 0.9rem;
+}
+.live-dot::before {
+  content: "";
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #64748b;
+  margin-right: 0.4rem;
+}
+.live-dot.on::before { background: #f87171; box-shadow: 0 0 8px #f87171; }
+.monitor-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-top: 0.75rem; }
+.monitor-actions select {
+  background: #1e293b;
+  color: var(--ink);
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 0.35rem 0.5rem;
+}
 header {
   display: flex;
   gap: 1.5rem;

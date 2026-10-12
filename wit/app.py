@@ -43,8 +43,8 @@ class WitApp(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("목격자 W.I.T  v0.1 — 연구용 프로토타입")
-        self.geometry("980x720")
-        self.minsize(860, 640)
+        self.geometry("1080x860")
+        self.minsize(920, 760)
         self.configure(bg="#0f172a")
 
         self.config_engine = EngineConfig()
@@ -95,6 +95,28 @@ class WitApp(tk.Tk):
             fg="#94a3b8",
             font=("Pretendard", 11),
         ).pack(side="left", padx=12)
+
+        monitor = tk.Frame(self, bg="#020617", highlightbackground="#475569", highlightthickness=6)
+        monitor.pack(fill="x", padx=12, pady=8)
+        tk.Label(
+            monitor,
+            text="웹캠 모니터  ·  측정 중 모습이 여기에 표시됩니다  ·  영상은 저장하지 않습니다",
+            bg="#020617",
+            fg="#94a3b8",
+            font=("Pretendard", 10),
+        ).pack(anchor="w", padx=8, pady=(6, 0))
+        self.video_lbl = tk.Label(
+            monitor,
+            text="카메라를 켜면 모니터에 모습이 나옵니다.\nDEMO는 슬라이더, 실측은 [카메라 시작]",
+            bg="#0b1220",
+            fg="#64748b",
+            font=("Pretendard", 13),
+            width=96,
+            height=12,
+            justify="center",
+        )
+        self.video_lbl.pack(fill="x", padx=8, pady=8)
+        self._photo = None
 
         self.state_lbl = tk.Label(
             self,
@@ -263,7 +285,27 @@ class WitApp(tk.Tk):
             self._render(snap)
         self.after(100, self._tick)
 
-    def _render(self, snap) -> None:
+    def _show_frame(self, frame) -> None:
+        if frame is None:
+            return
+        try:
+            import cv2
+        except ImportError:
+            return
+        h, w = frame.shape[:2]
+        max_w = 960
+        if w > max_w:
+            scale = max_w / w
+            frame = cv2.resize(frame, (max_w, int(h * scale)))
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        hh, ww = rgb.shape[:2]
+        header = f"P6 {ww} {hh} 255\n".encode("ascii")
+        self._photo = tk.PhotoImage(data=header + rgb.tobytes(), format="PPM")
+        self.video_lbl.config(image=self._photo, text="", width=ww, height=hh)
+
+    def _render(self, snap, frame=None) -> None:
+        if frame is not None:
+            self._show_frame(frame)
         show = snap.feedback_enabled
         if show:
             self.hidden_notice.pack_forget()
@@ -350,6 +392,13 @@ class WitApp(tk.Tk):
                 pass
         self.camera = None
         self.camera_mode = False
+        self._photo = None
+        self.video_lbl.config(
+            image="",
+            text="카메라를 켜면 모니터에 모습이 나옵니다.\nDEMO는 슬라이더, 실측은 [카메라 시작]",
+            width=96,
+            height=12,
+        )
         self._new_session()
 
     def _camera_loop(self) -> None:
@@ -372,7 +421,8 @@ class WitApp(tk.Tk):
                 )
             )
             self.logger.append(snap)
-            self.after(0, lambda s=snap: self._render(s))
+            frame = _frame
+            self.after(0, lambda s=snap, f=frame: self._render(s, f))
             time.sleep(0.03)
 
     def destroy(self) -> None:

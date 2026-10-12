@@ -22,6 +22,8 @@ class PoseReading:
     angle_deg: float
     visibility: float
     occluded: bool
+    ear_xy: tuple[float, float] | None = None
+    shoulder_xy: tuple[float, float] | None = None
 
 
 def default_model_path() -> Path:
@@ -109,7 +111,7 @@ class SideCameraPose:
             mp_image, timestamp_ms
         )
         reading = self._from_result(result)
-        return frame, reading
+        return annotate_frame(frame, reading, self.side), reading
 
     def close(self) -> None:
         if self._cap is not None:
@@ -129,4 +131,57 @@ class SideCameraPose:
         vis = min(getattr(ear, "visibility", 1.0) or 0.0, getattr(shoulder, "visibility", 1.0) or 0.0)
         angle = ear_shoulder_angle_deg(ear.x, ear.y, shoulder.x, shoulder.y)
         occluded = vis < 0.5
-        return PoseReading(angle, vis, occluded)
+        return PoseReading(
+            angle,
+            vis,
+            occluded,
+            ear_xy=(ear.x, ear.y),
+            shoulder_xy=(shoulder.x, shoulder.y),
+        )
+
+
+def annotate_frame(frame, reading: Optional[PoseReading], side: str):
+    """모니터용 미리보기: 원본 영상에 측정 가이드를 겹친다. 영상은 저장하지 않는다."""
+    import cv2
+
+    out = frame.copy()
+    h, w = out.shape[:2]
+    cv2.rectangle(out, (0, 0), (w - 1, 36), (30, 41, 59), -1)
+    cv2.putText(
+        out,
+        "W.I.T LIVE  |  webcam monitor  |  not saved",
+        (12, 24),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.55,
+        (248, 250, 252),
+        1,
+        cv2.LINE_AA,
+    )
+    if reading and reading.ear_xy and reading.shoulder_xy and not reading.occluded:
+        ex, ey = int(reading.ear_xy[0] * w), int(reading.ear_xy[1] * h)
+        sx, sy = int(reading.shoulder_xy[0] * w), int(reading.shoulder_xy[1] * h)
+        cv2.circle(out, (ex, ey), 8, (96, 165, 250), -1)
+        cv2.circle(out, (sx, sy), 8, (251, 191, 36), -1)
+        cv2.line(out, (ex, ey), (sx, sy), (52, 211, 153), 3)
+        cv2.putText(
+            out,
+            f"{reading.angle_deg:.1f} deg  side={side}",
+            (12, h - 16),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (226, 232, 240),
+            2,
+            cv2.LINE_AA,
+        )
+    elif reading and reading.occluded:
+        cv2.putText(
+            out,
+            "occluded / low confidence",
+            (12, h - 16),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (252, 165, 165),
+            2,
+            cv2.LINE_AA,
+        )
+    return out
