@@ -1,8 +1,9 @@
 import { FilesetResolver, PoseLandmarker, type NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { Point } from "../engine/types";
 
-const WASM = "/mediapipe";
-const MODEL = "/models/pose_landmarker_lite.task";
+const base = import.meta.env.BASE_URL;
+const WASM = `${base}mediapipe`;
+const MODEL = `${base}models/pose_landmarker_lite.task`;
 
 export type PoseFrame = {
   points: Point[];
