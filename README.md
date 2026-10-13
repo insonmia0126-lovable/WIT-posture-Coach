@@ -10,11 +10,12 @@
 
 ## 0.웹에서 바로 실행
 
-<img src="./docs/wit-web-qr.png" alt="목격자 웹 실행 QR 코드" width="220" />
-
 ## https://insonmia0126-lovable.github.io/WIT-posture-Coach/ ##
 
+<img src="./docs/wit-web-qr.png" alt="목격자 웹 실행 QR 코드" width="220" />
+
 -Chrome에서 위 주소를 연 뒤 웹캠 시작을 누르고 카메라 권한을 허용하세요. 
+
 -또는  QR코드를 카메라로 찍어서 웹사이트와 바로 연결하세요
 
 -HTTPS라서 별도 서버 없이 브라우저에서 동작합니다. 
