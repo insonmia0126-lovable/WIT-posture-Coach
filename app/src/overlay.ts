@@ -16,7 +16,7 @@ function strokeLine(
 ) {
   ctx.lineCap = "round";
   ctx.strokeStyle = "#111111";
-  ctx.lineWidth = width + 5;
+  ctx.lineWidth = width + 2;
   ctx.beginPath();
   ctx.moveTo(x1, y1);
   ctx.lineTo(x2, y2);
@@ -31,7 +31,7 @@ function strokeLine(
 
 function dot(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, fill: string) {
   ctx.beginPath();
-  ctx.arc(x, y, r + 3, 0, Math.PI * 2);
+  ctx.arc(x, y, r + 1.25, 0, Math.PI * 2);
   ctx.fillStyle = "#111111";
   ctx.fill();
   ctx.beginPath();
@@ -68,14 +68,14 @@ export function drawOverlay(
     const nose = points[LM.NOSE];
     const shoulderPx = Math.hypot((rs.x - ls.x) * w, (rs.y - ls.y) * h);
     const facePx = Math.hypot((re.x - le.x) * w, (re.y - le.y) * h);
-    const lineW = clamp(shoulderPx * 0.05, 5, 16);
-    const jointR = clamp(shoulderPx * 0.06, 9, 24);
+    const lineW = clamp(shoulderPx * 0.02, 2, 6);
+    const jointR = clamp(shoulderPx * 0.028, 3.5, 9);
     const faceRx = clamp(facePx * 1.35, 28, w * 0.22);
     const faceRy = clamp(facePx * 1.8, 36, h * 0.28);
 
     ctx.setLineDash([10, 7]);
     ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.ellipse(nose.x * w, nose.y * h, faceRx, faceRy, 0, 0, Math.PI * 2);
     ctx.stroke();
@@ -97,7 +97,7 @@ export function drawOverlay(
 
   ctx.setLineDash([8, 6]);
   ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
-  ctx.lineWidth = 3;
+  ctx.lineWidth = 1.5;
   ctx.beginPath();
   ctx.ellipse(w * 0.5, h * 0.32, w * 0.16, h * 0.2, 0, 0, Math.PI * 2);
   ctx.stroke();

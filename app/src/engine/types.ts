@@ -50,7 +50,7 @@ export type CoachSettings = {
 };
 
 export const DEFAULT_SETTINGS: CoachSettings = {
-  calibrationMs: 10000,
+  calibrationMs: 7000,
   sustainMs: 20000,
   repeatAlertMs: 180000,
   recoveryMs: 3000,

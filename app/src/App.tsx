@@ -284,7 +284,7 @@ export default function App() {
           )}
           <p className="muted">
             노트북을 안정된 위치에 놓고 화면 각도를 고정해 주세요. 얼굴과 양쪽 어깨가 보이도록 앉은 뒤 기준
-            자세를 등록하세요. 노트북 위치나 화면 각도를 바꾸면 재등록하세요.
+            자세를 등록하세요. 기준 등록은 7초입니다. 노트북 위치나 화면 각도를 바꾸면 재등록하세요.
           </p>
           <div className="live-grid">
             <div>
@@ -505,6 +505,10 @@ function SettingsPanel({
     <div className="card">
       <h2>시제품 설정</h2>
       <p className="muted">값은 검증용 가정이며 의료 기준이 아닙니다. 발표용 단축과 실사용 기본을 구분하세요.</p>
+      <label className="field">
+        기준 등록(ms){" "}
+        <input type="number" value={settings.calibrationMs} onChange={(e) => set("calibrationMs", +e.target.value)} />
+      </label>
       <label className="field">
         변화 지속(ms) <input type="number" value={settings.sustainMs} onChange={(e) => set("sustainMs", +e.target.value)} />
       </label>
