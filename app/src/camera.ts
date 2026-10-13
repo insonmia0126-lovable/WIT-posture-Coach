@@ -1,4 +1,7 @@
 export function cameraErrorMessage(err: unknown): string {
+  if (typeof window !== "undefined" && !window.isSecureContext) {
+    return "Chrome은 카메라에 http://127.0.0.1 또는 https 주소만 허용합니다. 지금 주소 대신 http://127.0.0.1:43124 를 여세요.";
+  }
   const name = err && typeof err === "object" && "name" in err ? String((err as DOMException).name) : "";
   const msg = err && typeof err === "object" && "message" in err ? String((err as Error).message) : String(err);
   if (name === "NotAllowedError" || name === "PermissionDeniedError") {

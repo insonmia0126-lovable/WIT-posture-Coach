@@ -168,19 +168,32 @@ PC나 스마트폰을 사용하다 보면 자신도 모르게 고개를 숙이�
 버전 이력은 [`version/`](./version/) 폴더에서 봅니다. (`v0.1`, `v0.2`, 이후 릴리스)  
 결과에서 배운 점은 [`learning/`](./learning/)에 버전을 붙여 남깁니다.
 
-## 실행 (노트북 웹캠 프로토타입 · v0.2)
+## 실행 (노트북 · Windows Chrome · v0.2)
 
-Chrome 또는 Edge에서 `localhost`로 실행합니다.
+저장소 주소만 열면 앱이 실행되지 않습니다. 먼저 이 PC에서 개발 서버를 켜고, 그다음 Chrome에서 로컬 주소를 엽니다.
 
-```bash
-cd app
-npm install
-npm run dev
+필요: Node.js **22 LTS** (또는 20.19 이상). `node -v`로 확인합니다.
+
+저장소를 받은 폴더에서:
+
+```bat
+start_windows.bat
 ```
 
-브라우저에서 http://127.0.0.1:43124 를 열고 **웹캠 시작**을 누른 뒤 카메라 권한을 허용하세요. 웹캠이 없으면 **데모 시작**(시연 모드)으로 흐름을 확인할 수 있습니다.
+또는 같은 폴더의 터미널에서:
 
-자세 모델과 WASM은 `app/public/`에 포함되어 있으며, 프레임은 이 브라우저에서만 처리합니다.
+```bash
+npm install --prefix app
+npm run dev --prefix app
+```
+
+터미널에 `Local: http://localhost:43124/` 가 나온 뒤에만 Chrome에서 아래 주소를 엽니다.
+
+http://127.0.0.1:43124
+
+`192.168…` 같은 공유 주소는 Chrome이 카메라를 막습니다. 반드시 `127.0.0.1` 또는 `localhost`를 사용하세요. 서버 창을 닫으면 페이지도 열리지 않습니다.
+
+**웹캠 시작** 후 카메라 권한을 허용합니다. 카메라가 없으면 **데모 시작**으로 흐름을 볼 수 있습니다. 자세 모델과 WASM은 `app/public/models`, `app/public/mediapipe`에 있습니다.
 
 ---
 

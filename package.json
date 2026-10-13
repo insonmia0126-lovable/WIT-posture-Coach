@@ -1,0 +1,11 @@
+{
+  "name": "wit-posture-coach",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix app run dev",
+    "start": "npm --prefix app run dev"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  }
+}
