@@ -156,3 +156,33 @@ input[type="number"] {
   background: #fff;
 }
 label.field { display: flex; justify-content: space-between; gap: 1rem; margin: 0.35rem 0; }
+.result-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  margin: 0.6rem 0 0.8rem;
+  font-size: 0.95rem;
+}
+.result-table caption {
+  text-align: left;
+  font-weight: 700;
+  padding: 0.4rem 0;
+}
+.result-table th, .result-table td {
+  border: 1px solid var(--line);
+  padding: 0.45rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+}
+.result-table th { background: #efe8dc; color: var(--navy); }
+.result-table td:nth-child(2) { font-weight: 700; white-space: nowrap; }
+.result-table td:nth-child(3) { color: var(--muted); font-size: 0.88rem; }
+.coach-guide {
+  margin-top: 1.1rem;
+  padding: 0.9rem 1rem;
+  background: var(--green-bg);
+  border: 1px solid #c5d9cb;
+  border-radius: 10px;
+}
+.coach-guide h3 { color: var(--green); }
+.coach-guide p { margin: 0.4rem 0; }

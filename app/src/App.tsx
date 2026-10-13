@@ -11,6 +11,7 @@ import {
 } from "./engine/types";
 import { drawOverlay } from "./overlay";
 import { createPoseLandmarker, detectPose } from "./pose/landmarker";
+import { personalCoachLines } from "./coachGuide";
 import { deleteSessions, loadSessions, saveSession, toCsv, type StoredSession } from "./storage";
 
 type View = "start" | "live" | "results" | "settings";
@@ -202,6 +203,10 @@ export default function App() {
     cancelAnimationFrame(loopRef.current);
     stopCameraTracks();
     const s = engine.snapshot(now());
+    const kindCounts = { head: 0, shoulder: 0, torso: 0 };
+    for (const ev of engine.events) {
+      if (ev.state === "coaching" && ev.kind) kindCounts[ev.kind] += 1;
+    }
     const row: StoredSession = {
       id: crypto.randomUUID(),
       startedAt: new Date().toISOString(),
@@ -213,6 +218,7 @@ export default function App() {
       coachingCount: s.coachingCount,
       recoveryCount: s.recoveryCount,
       meanRecoveryMs: s.meanRecoveryMs,
+      kindCounts,
       timeline: engine.events,
     };
     if (!demo) saveSession(row);
@@ -573,24 +579,84 @@ function Results({
     s && s.meanRecoveryMs != null && s.recoveryCount > 0
       ? `${(s.meanRecoveryMs / 1000).toFixed(1)}초 (${s.recoveryCount}건)`
       : "계산할 기록 없음";
+  const kinds = s?.kindCounts ?? { head: 0, shoulder: 0, torso: 0 };
+  const coachLines = s ? personalCoachLines(s) : [];
   return (
     <div className="card">
       <h2>세션 결과</h2>
-      {s?.demo && <p className="banner-sim" style={{ position: "relative" }}>시뮬레이션 데이터</p>}
+      {s?.demo && <p className="banner-sim" style={{ position: "relative" }}>시연 모드 · 시뮬레이션 데이터</p>}
       {!s ? (
         <p className="muted">방금 끝난 세션이 없습니다. 최근 실측 기록만 아래에 있습니다.</p>
       ) : (
         <>
-          <div className="metrics-list">
-            <div>전체 세션 {(s.sessionMs / 1000).toFixed(1)}초</div>
-            <div>유효 측정 {(s.validMs / 1000).toFixed(1)}초</div>
-            <div>측정 불가 {(s.unavailableMs / 1000).toFixed(1)}초</div>
-            <div>기준 범위 유지 {ratio}</div>
-            <div>교정 안내 {s.coachingCount}회</div>
-            <div>복귀 {s.recoveryCount}회</div>
-            <div>평균 복귀 {rec}</div>
-          </div>
-          <p className="muted">유지 비율 분모는 유효 측정 시간입니다. 측정 불가는 정상으로 넣지 않습니다.</p>
+          <table className="result-table">
+            <caption>이번 세션 요약</caption>
+            <thead>
+              <tr>
+                <th>항목</th>
+                <th>값</th>
+                <th>설명</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>모드</td>
+                <td>{s.demo ? "시연(시뮬레이션)" : "웹캠 실측"}</td>
+                <td>실측과 시연 기록은 구분합니다</td>
+              </tr>
+              <tr>
+                <td>전체 세션</td>
+                <td>{(s.sessionMs / 1000).toFixed(1)}초</td>
+                <td>시작부터 종료까지</td>
+              </tr>
+              <tr>
+                <td>유효 측정</td>
+                <td>{(s.validMs / 1000).toFixed(1)}초</td>
+                <td>얼굴·어깨가 인식된 시간</td>
+              </tr>
+              <tr>
+                <td>측정 불가</td>
+                <td>{(s.unavailableMs / 1000).toFixed(1)}초</td>
+                <td>기준 유지·이탈 시간에 넣지 않음</td>
+              </tr>
+              <tr>
+                <td>기준 범위 유지</td>
+                <td>{ratio}</td>
+                <td>분모는 유효 측정 시간</td>
+              </tr>
+              <tr>
+                <td>교정 안내</td>
+                <td>{s.coachingCount}회</td>
+                <td>지속된 자세 변화에 대한 알림</td>
+              </tr>
+              <tr>
+                <td>　· 고개</td>
+                <td>{kinds.head}회</td>
+                <td>좌우 기울어짐 안내</td>
+              </tr>
+              <tr>
+                <td>　· 어깨</td>
+                <td>{kinds.shoulder}회</td>
+                <td>좌우 높이 차이 안내</td>
+              </tr>
+              <tr>
+                <td>　· 상체</td>
+                <td>{kinds.torso}회</td>
+                <td>보조 지표 안내</td>
+              </tr>
+              <tr>
+                <td>기준 복귀</td>
+                <td>{s.recoveryCount}회</td>
+                <td>안내 후 기준 범위로 돌아온 횟수</td>
+              </tr>
+              <tr>
+                <td>평균 복귀</td>
+                <td>{rec}</td>
+                <td>복귀가 없으면 계산하지 않음</td>
+              </tr>
+            </tbody>
+          </table>
+          <p className="muted">유지 비율 분모는 유효 측정 시간입니다. 측정 불가는 정상 자세로 집계하지 않습니다.</p>
           <div className="timeline" title="상태 변화">
             {s.timeline.map((ev, i) => {
               const next = s.timeline[i + 1]?.t ?? s.sessionMs;
@@ -607,6 +673,13 @@ function Results({
               return <span key={i} style={{ width: `${w}%`, background: color[ev.state] || "#ccc" }} />;
             })}
           </div>
+          <section className="coach-guide">
+            <h3>개인 코치 가이드</h3>
+            <p className="muted">이번 세션의 자세 변화 기록을 규칙으로 정리한 안내입니다. 의료 진단이 아닙니다.</p>
+            {coachLines.map((line, i) => (
+              <p key={i}>{line}</p>
+            ))}
+          </section>
         </>
       )}
       <div className="row" style={{ marginTop: 12 }}>

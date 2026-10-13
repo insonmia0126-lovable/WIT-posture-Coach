@@ -37,7 +37,7 @@ export class CoachEngine {
   unavailableMs = 0;
   inRangeMs = 0;
   lastInferMs = 0;
-  events: { t: number; state: AppState }[] = [];
+  events: { t: number; state: AppState; kind?: ChangeKind }[] = [];
   pausedAt: number | null = null;
   prePause: AppState = "ready";
   demo = false;
@@ -320,6 +320,12 @@ export class CoachEngine {
 
   private pushEvent(t: number) {
     const last = this.events[this.events.length - 1];
-    if (!last || last.state !== this.state) this.events.push({ t, state: this.state });
+    if (!last || last.state !== this.state) {
+      this.events.push({
+        t,
+        state: this.state,
+        kind: this.state === "coaching" ? this.changeKind ?? undefined : undefined,
+      });
+    }
   }
 }

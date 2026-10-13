@@ -1,5 +1,7 @@
 import type { AppState } from "./engine/types";
 
+export type KindCounts = { head: number; shoulder: number; torso: number };
+
 export type StoredSession = {
   id: string;
   startedAt: string;
@@ -11,6 +13,7 @@ export type StoredSession = {
   coachingCount: number;
   recoveryCount: number;
   meanRecoveryMs: number | null;
+  kindCounts: KindCounts;
   timeline: { t: number; state: AppState }[];
 };
 
@@ -45,12 +48,16 @@ export function toCsv(rows: StoredSession[]): string {
     "unavailable_s",
     "in_range_ratio",
     "coaching_count",
+    "head_alerts",
+    "shoulder_alerts",
+    "torso_alerts",
     "recovery_count",
     "mean_recovery_s",
   ];
   const lines = rows.map((r) => {
     const ratio = r.validMs > 0 ? ((r.inRangeMs / r.validMs) * 100).toFixed(1) : "";
     const rec = r.meanRecoveryMs == null ? "" : (r.meanRecoveryMs / 1000).toFixed(2);
+    const k = r.kindCounts ?? { head: 0, shoulder: 0, torso: 0 };
     return [
       r.id,
       r.startedAt,
@@ -60,6 +67,9 @@ export function toCsv(rows: StoredSession[]): string {
       (r.unavailableMs / 1000).toFixed(1),
       ratio,
       String(r.coachingCount),
+      String(k.head),
+      String(k.shoulder),
+      String(k.torso),
       String(r.recoveryCount),
       rec,
     ].join(",");
