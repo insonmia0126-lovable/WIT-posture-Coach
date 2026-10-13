@@ -281,7 +281,7 @@ export default function App() {
         <>
           <header className="row" style={{ justifyContent: "space-between", marginBottom: 12 }}>
             <div>
-              <div className="kicker">목격자 W.I.T</div>
+              <div className="kicker">목격자 W.I.T · v0.2</div>
               <strong>당신의 자세 변화를 살피는 개인 코치</strong>
             </div>
             <div className="row">
@@ -463,6 +463,7 @@ function StartScreen({
     <div>
       <p className="kicker">온디바이스 · 영상 외부 전송 없음</p>
       <h1>목격자 W.I.T</h1>
+      <p className="kicker">v0.2 · 노트북 웹캠 프로토타입</p>
       <p style={{ fontSize: "1.2rem" }}>당신의 자세 변화를 살피는 개인 코치</p>
       <p className="notice">
         카메라 프레임과 좌표는 이 브라우저에서만 처리합니다. 영상과 사진은 저장하지 않습니다. 결과 기록은
