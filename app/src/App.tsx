@@ -37,6 +37,8 @@ export default function App() {
   const [devOpen, setDevOpen] = useState(true);
   const [inferFps, setInferFps] = useState(0);
   const [modelReady, setModelReady] = useState(false);
+  const [camStatus, setCamStatus] = useState("");
+  const modelPromise = useRef<Promise<unknown> | null>(null);
   const [sessions, setSessions] = useState<StoredSession[]>(() => loadSessions());
   const [result, setResult] = useState<StoredSession | null>(null);
 
@@ -59,6 +61,10 @@ export default function App() {
   }, [engine, settings]);
 
   useEffect(() => {
+    void ensureModel();
+  }, []);
+
+  useEffect(() => {
     const onVis = () => {
       hiddenRef.current = document.hidden;
       if (document.hidden && engine.state !== "paused" && view === "live") {
@@ -75,18 +81,24 @@ export default function App() {
 
   async function ensureModel() {
     if (landmarkerRef.current) return landmarkerRef.current;
-    try {
-      landmarkerRef.current = await createPoseLandmarker();
-      setModelReady(true);
-      return landmarkerRef.current;
-    } catch (e) {
-      setError(
-        "자세 모델을 불러오지 못했습니다. 로컬 파일(/models/pose_landmarker_lite.task, /mediapipe)을 확인하세요. " +
-          (e instanceof Error ? e.message : ""),
-      );
-      setModelReady(false);
-      throw e;
+    if (!modelPromise.current) {
+      modelPromise.current = createPoseLandmarker()
+        .then((lm) => {
+          landmarkerRef.current = lm;
+          setModelReady(true);
+          return lm;
+        })
+        .catch((e) => {
+          modelPromise.current = null;
+          setModelReady(false);
+          setError(
+            "자세 모델을 불러오지 못했습니다. 로컬 파일(/models/pose_landmarker_lite.task, /mediapipe)을 확인하세요. " +
+              (e instanceof Error ? e.message : ""),
+          );
+          throw e;
+        });
     }
+    return modelPromise.current as Promise<NonNullable<typeof landmarkerRef.current>>;
   }
 
   async function startWebcam() {
@@ -94,37 +106,34 @@ export default function App() {
     setDemo(false);
     demoRef.current = false;
     engine.settings = { ...settings, demoShortDurations: false };
+    setCamStatus("웹캠을 켜는 중…");
+    setView("live");
+    t0.current = performance.now();
+    setSnap(engine.startSession(0, false));
+    const modelTask = ensureModel();
     try {
-      await ensureModel();
-      const cams = await listCameras();
-      setCameras(cams);
       const constraints: MediaStreamConstraints = {
         audio: false,
         video: deviceId
-          ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
-          : { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+          ? { deviceId: { exact: deviceId }, width: { ideal: 960 }, height: { ideal: 540 } }
+          : { facingMode: "user", width: { ideal: 960 }, height: { ideal: 540 } },
       };
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
-      const v = videoRef.current;
-      if (v) {
-        v.srcObject = stream;
-        await v.play();
-      }
-      const after = await listCameras();
-      setCameras(after);
-      t0.current = performance.now();
-      setSnap(engine.startSession(0, false));
-      setView("live");
+      setCamStatus("");
       requestAnimationFrame(() => {
         const el = videoRef.current;
-        if (el && streamRef.current) {
-          el.srcObject = streamRef.current;
+        if (el) {
+          el.srcObject = stream;
           void el.play();
         }
         startLoop(false);
       });
+      void listCameras().then(setCameras);
+      await modelTask;
     } catch (e) {
+      setCamStatus("");
+      setView("start");
       setError(cameraErrorMessage(e));
     }
   }
@@ -283,6 +292,10 @@ export default function App() {
                 <video ref={videoRef} playsInline muted autoPlay />
                 <canvas ref={canvasRef} />
                 <div className="guide-caption">얼굴과 양쪽 어깨가 안내선 안에 오게 앉으세요</div>
+                {camStatus && <div className="cam-status">{camStatus}</div>}
+                {!demo && !modelReady && !camStatus && (
+                  <div className="cam-status">미리보기 표시 중 · 자세 모델 준비</div>
+                )}
               </div>
               <div className="row" style={{ marginTop: 10 }}>
                 <button

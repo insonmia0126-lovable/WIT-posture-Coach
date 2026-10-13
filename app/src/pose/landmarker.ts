@@ -19,17 +19,15 @@ export async function createPoseLandmarker(): Promise<PoseLandmarker> {
     minPosePresenceConfidence: 0.5,
     minTrackingConfidence: 0.5,
   };
-  try {
-    return await PoseLandmarker.createFromOptions(vision, {
-      ...options,
-      baseOptions: { modelAssetPath: MODEL, delegate: "GPU" },
-    });
-  } catch {
-    return PoseLandmarker.createFromOptions(vision, {
+  return PoseLandmarker.createFromOptions(vision, {
+    ...options,
+    baseOptions: { modelAssetPath: MODEL, delegate: "GPU" },
+  }).catch(() =>
+    PoseLandmarker.createFromOptions(vision, {
       ...options,
       baseOptions: { modelAssetPath: MODEL, delegate: "CPU" },
-    });
-  }
+    }),
+  );
 }
 
 export function detectPose(landmarker: PoseLandmarker, video: HTMLVideoElement, timestampMs: number): PoseFrame {
