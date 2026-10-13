@@ -65,7 +65,7 @@ export function personalCoachLines(s: StoredSession): string[] {
   }
 
   if (lines.length < 3) {
-    lines.push("목격자는 질환을 진단하지 않습니다. 불편함이 있으면 자세를 바꾸고 휴식을 우선하세요.");
+    lines.push("불편함이 있으면 자세를 바꾸고 휴식을 우선하세요.");
   }
   if (lines.length < 3) {
     lines.push("카메라 위치나 앉는 자리를 바꿨다면 다음 세션 시작 전에 기준 자세를 다시 등록하세요.");

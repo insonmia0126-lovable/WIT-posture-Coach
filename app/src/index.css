@@ -186,3 +186,9 @@ label.field { display: flex; justify-content: space-between; gap: 1rem; margin: 
 }
 .coach-guide h3 { color: var(--green); }
 .coach-guide p { margin: 0.4rem 0; }
+.legal-warn {
+  font-family: Pretendard, "Pretendard Variable", "Noto Sans KR", sans-serif;
+  font-weight: 700;
+  color: #e11d2e;
+  margin: 0.35rem 0;
+}

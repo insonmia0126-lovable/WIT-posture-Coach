@@ -675,7 +675,9 @@ function Results({
           </div>
           <section className="coach-guide">
             <h3>개인 코치 가이드</h3>
-            <p className="muted">이번 세션의 자세 변화 기록을 규칙으로 정리한 안내입니다. 의료 진단이 아닙니다.</p>
+            <p className="muted">이번 세션의 자세 변화 기록을 규칙으로 정리한 안내입니다.</p>
+            <p className="legal-warn">의료 진단이 아닙니다</p>
+            <p className="legal-warn">목격자는 질환을 진단하지 않습니다</p>
             {coachLines.map((line, i) => (
               <p key={i}>{line}</p>
             ))}
