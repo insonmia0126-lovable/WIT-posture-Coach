@@ -180,7 +180,7 @@ v0.2에서 쓰는 구성입니다.
 버전 이력은 [`version/`](./version/) 폴더에서 봅니다. (`v0.1`, `v0.2`, 이후 릴리스)  
 결과에서 배운 점은 [`learning/`](./learning/)에 버전을 붙여 남깁니다.
 
-## 웹에서 바로 실행
+## 웹에서 바로 실행 <details><summary>QR 코드</summary><img src="./docs/wit-web-qr.png" alt="목격자 웹 실행 QR 코드" width="220" /></details>
 
 https://insonmia0126-lovable.github.io/WIT-posture-Coach/
 
