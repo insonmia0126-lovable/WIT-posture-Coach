@@ -4,6 +4,8 @@ export type KindCounts = { head: number; shoulder: number; torso: number };
 
 export type StoredSession = {
   id: string;
+  personId?: string;
+  personName?: string;
   startedAt: string;
   demo: boolean;
   sessionMs: number;
@@ -31,16 +33,32 @@ export function loadSessions(): StoredSession[] {
 export function saveSession(row: StoredSession) {
   const all = loadSessions().filter((s) => s.id !== row.id);
   all.unshift(row);
-  localStorage.setItem(KEY, JSON.stringify(all.slice(0, 40)));
+  localStorage.setItem(KEY, JSON.stringify(all.slice(0, 300)));
+}
+
+export function sessionsForPerson(rows: StoredSession[], personId: string): StoredSession[] {
+  return rows.filter((s) => s.personId === personId && !s.demo);
 }
 
 export function deleteSessions() {
   localStorage.removeItem(KEY);
 }
 
+export function deletePersonSessions(personId: string) {
+  const kept = loadSessions().filter((s) => s.personId !== personId);
+  localStorage.setItem(KEY, JSON.stringify(kept));
+}
+
+export function deleteSession(id: string) {
+  const kept = loadSessions().filter((s) => s.id !== id);
+  localStorage.setItem(KEY, JSON.stringify(kept));
+}
+
 export function toCsv(rows: StoredSession[]): string {
   const header = [
     "id",
+    "person_id",
+    "person_name",
     "startedAt",
     "mode",
     "session_s",
@@ -60,6 +78,8 @@ export function toCsv(rows: StoredSession[]): string {
     const k = r.kindCounts ?? { head: 0, shoulder: 0, torso: 0 };
     return [
       r.id,
+      r.personId ?? "",
+      csvCell(r.personName ?? ""),
       r.startedAt,
       r.demo ? "DEMO" : "WEBCAM",
       (r.sessionMs / 1000).toFixed(1),
@@ -75,4 +95,9 @@ export function toCsv(rows: StoredSession[]): string {
     ].join(",");
   });
   return [header.join(","), ...lines].join("\n");
+}
+
+function csvCell(value: string): string {
+  if (/[",\n]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
+  return value;
 }

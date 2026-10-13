@@ -54,7 +54,7 @@ export function learningToMarkdown(entries: LearningEntry[]): string {
     const k = s.kindCounts ?? { head: 0, shoulder: 0, torso: 0 };
     const ratio = s.validMs > 0 ? ((s.inRangeMs / s.validMs) * 100).toFixed(1) : "—";
     return [
-      `## ${e.savedAt} · v${e.appVersion} · ${s.demo ? "시연" : "웹캠"}`,
+      `## ${e.savedAt} · v${e.appVersion} · ${s.personId ?? "아이디 없음"}${s.personName ? ` · ${s.personName}` : ""} · ${s.demo ? "시연" : "웹캠"}`,
       "",
       `- 세션 ${ (s.sessionMs / 1000).toFixed(1) }초 / 유효 ${ (s.validMs / 1000).toFixed(1) }초 / 불가 ${ (s.unavailableMs / 1000).toFixed(1) }초`,
       `- 기준 유지 ${ratio}% / 안내 ${s.coachingCount} (고개 ${k.head}, 어깨 ${k.shoulder}, 상체 ${k.torso}) / 복귀 ${s.recoveryCount}`,

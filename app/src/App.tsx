@@ -21,10 +21,19 @@ import {
   updateLearningMemo,
   type LearningEntry,
 } from "./learningStore";
-import { deleteSessions, loadSessions, saveSession, toCsv, type StoredSession } from "./storage";
+import { createPerson, currentPerson, listPeople, renamePerson, switchPerson, type Person } from "./person";
+import {
+  deletePersonSessions,
+  deleteSession,
+  loadSessions,
+  saveSession,
+  sessionsForPerson,
+  toCsv,
+  type StoredSession,
+} from "./storage";
 import { APP_VERSION } from "./version";
 
-type View = "start" | "live" | "results" | "settings" | "learning";
+type View = "start" | "live" | "results" | "settings" | "learning" | "history";
 const STATE_KO: Record<AppState, string> = {
   ready: "준비",
   calibrating: "기준 자세 등록 중",
@@ -50,6 +59,8 @@ export default function App() {
   const [modelReady, setModelReady] = useState(false);
   const [camStatus, setCamStatus] = useState("");
   const modelPromise = useRef<Promise<unknown> | null>(null);
+  const [person, setPerson] = useState<Person>(() => currentPerson());
+  const [people, setPeople] = useState<Person[]>(() => listPeople());
   const [sessions, setSessions] = useState<StoredSession[]>(() => loadSessions());
   const [learning, setLearning] = useState<LearningEntry[]>(() => loadLearning());
   const [result, setResult] = useState<StoredSession | null>(null);
@@ -234,8 +245,11 @@ export default function App() {
     for (const ev of engine.events) {
       if (ev.state === "coaching" && ev.kind) kindCounts[ev.kind] += 1;
     }
+    const who = currentPerson();
     const row: StoredSession = {
       id: crypto.randomUUID(),
+      personId: who.id,
+      personName: who.name,
       startedAt: new Date().toISOString(),
       demo,
       sessionMs: s.sessionMs,
@@ -264,11 +278,19 @@ export default function App() {
     setView("results");
   }
 
+  function refreshPeople(next?: Person) {
+    const peopleNow = listPeople();
+    setPeople(peopleNow);
+    setPerson(next ?? currentPerson());
+  }
+
   function exportCsv() {
-    const blob = new Blob([toCsv(loadSessions())], { type: "text/csv;charset=utf-8" });
+    const who = currentPerson();
+    const mine = sessionsForPerson(loadSessions(), who.id);
+    const blob = new Blob([toCsv(mine)], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "wit-sessions.csv";
+    a.download = `wit-${who.id}.csv`;
     a.click();
   }
 
@@ -280,13 +302,25 @@ export default function App() {
       {view === "start" && (
         <StartScreen
           error={error}
-          sessions={sessions}
+          person={person}
+          people={people}
+          sessions={sessionsForPerson(sessions, person.id)}
           learningCount={learning.length}
           cameras={cameras}
           deviceId={deviceId}
           onDevice={setDeviceId}
           onWebcam={startWebcam}
           onDemo={startDemo}
+          onHistory={() => setView("history")}
+          onRename={(name) => {
+            const next = renamePerson(person.id, name);
+            if (next) refreshPeople(next);
+          }}
+          onCreate={() => refreshPeople(createPerson(""))}
+          onSwitch={(id) => {
+            const next = switchPerson(id);
+            if (next) refreshPeople(next);
+          }}
           onLearning={() => setView("learning")}
           onRefreshCams={async () => setCameras(await listCameras())}
         />
@@ -445,14 +479,42 @@ export default function App() {
       {view === "results" && (
         <Results
           current={result}
-          sessions={sessions}
+          sessions={sessionsForPerson(sessions, person.id)}
+          person={person}
           onCsv={exportCsv}
           onDelete={() => {
-            deleteSessions();
-            setSessions([]);
+            deletePersonSessions(person.id);
+            setSessions(loadSessions());
           }}
           onHome={() => setView("start")}
           onLearning={() => setView("learning")}
+        />
+      )}
+
+      {view === "history" && (
+        <HistoryScreen
+          person={person}
+          people={people}
+          sessions={sessionsForPerson(sessions, person.id)}
+          onRename={(name) => {
+            const next = renamePerson(person.id, name);
+            if (next) refreshPeople(next);
+          }}
+          onCreate={() => refreshPeople(createPerson(""))}
+          onSwitch={(id) => {
+            const next = switchPerson(id);
+            if (next) refreshPeople(next);
+          }}
+          onDeleteOne={(id) => {
+            deleteSession(id);
+            setSessions(loadSessions());
+          }}
+          onDeleteAll={() => {
+            deletePersonSessions(person.id);
+            setSessions(loadSessions());
+          }}
+          onCsv={exportCsv}
+          onHome={() => setView("start")}
         />
       )}
 
@@ -483,6 +545,8 @@ export default function App() {
 
 function StartScreen({
   error,
+  person,
+  people,
   sessions,
   learningCount,
   cameras,
@@ -491,9 +555,15 @@ function StartScreen({
   onWebcam,
   onDemo,
   onLearning,
+  onHistory,
+  onRename,
+  onCreate,
+  onSwitch,
   onRefreshCams,
 }: {
   error: string;
+  person: Person;
+  people: Person[];
   sessions: StoredSession[];
   learningCount: number;
   cameras: MediaDeviceInfo[];
@@ -502,6 +572,10 @@ function StartScreen({
   onWebcam: () => void;
   onDemo: () => void;
   onLearning: () => void;
+  onHistory: () => void;
+  onRename: (name: string) => void;
+  onCreate: () => void;
+  onSwitch: (id: string) => void;
   onRefreshCams: () => void;
 }) {
   return (
@@ -515,6 +589,14 @@ function StartScreen({
         사용자 브라우저(localStorage)에만 남습니다. 같은 주소를 여러 사람이 동시에 열어도 각자 기기에서
         따로 측정합니다.
       </p>
+      <PersonCard
+        person={person}
+        people={people}
+        onRename={onRename}
+        onCreate={onCreate}
+        onSwitch={onSwitch}
+        onHistory={onHistory}
+      />
       {error && <p className="error">{error}</p>}
       <div className="row" style={{ margin: "1rem 0" }}>
         <button type="button" className="primary" onClick={onWebcam}>
@@ -540,9 +622,9 @@ function StartScreen({
           </select>
         )}
       </div>
-      <h3>최근 사용 기록</h3>
+      <h3>이 아이디의 최근 실측</h3>
       {sessions.length === 0 ? (
-        <p className="muted">저장된 실측 기록이 없습니다.</p>
+        <p className="muted">이 아이디로 저장된 실측 기록이 없습니다.</p>
       ) : (
         <ul className="session-list">
           {sessions.slice(0, 8).map((s) => (
@@ -626,9 +708,146 @@ function SettingsPanel({
   );
 }
 
+function PersonCard({
+  person,
+  people,
+  onRename,
+  onCreate,
+  onSwitch,
+  onHistory,
+}: {
+  person: Person;
+  people: Person[];
+  onRename: (name: string) => void;
+  onCreate: () => void;
+  onSwitch: (id: string) => void;
+  onHistory: () => void;
+}) {
+  const [name, setName] = useState(person.name);
+  useEffect(() => setName(person.name), [person.id, person.name]);
+  return (
+    <div className="card" style={{ margin: "1rem 0" }}>
+      <p className="kicker">개인 아이디</p>
+      <p style={{ fontSize: "1.6rem", fontWeight: 700, letterSpacing: "0.04em", margin: "0.2rem 0" }}>{person.id}</p>
+      <p className="muted">이 브라우저에 부여된 아이디입니다. 측정 이력은 이 아이디로만 이 기기에 남습니다.</p>
+      <div className="row">
+        <label>
+          이름
+          <input
+            value={name}
+            maxLength={40}
+            placeholder="표시 이름"
+            onChange={(e) => setName(e.target.value)}
+            onBlur={() => onRename(name)}
+          />
+        </label>
+        {people.length > 1 && (
+          <label>
+            이 기기의 다른 아이디
+            <select value={person.id} onChange={(e) => onSwitch(e.target.value)}>
+              {people.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.id}
+                  {p.name ? ` · ${p.name}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <button type="button" onClick={onCreate}>
+          새 아이디
+        </button>
+        <button type="button" onClick={onHistory}>
+          이력
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function HistoryScreen({
+  person,
+  people,
+  sessions,
+  onRename,
+  onCreate,
+  onSwitch,
+  onDeleteOne,
+  onDeleteAll,
+  onCsv,
+  onHome,
+}: {
+  person: Person;
+  people: Person[];
+  sessions: StoredSession[];
+  onRename: (name: string) => void;
+  onCreate: () => void;
+  onSwitch: (id: string) => void;
+  onDeleteOne: (id: string) => void;
+  onDeleteAll: () => void;
+  onCsv: () => void;
+  onHome: () => void;
+}) {
+  return (
+    <div>
+      <PersonCard person={person} people={people} onRename={onRename} onCreate={onCreate} onSwitch={onSwitch} onHistory={() => {}} />
+      <h2>측정 이력</h2>
+      <p className="muted">실측만 남깁니다. 시연 기록은 이 목록에 넣지 않습니다. 다른 컴퓨터의 기록은 여기로 모이지 않습니다.</p>
+      <div className="row" style={{ margin: "0.8rem 0" }}>
+        <button type="button" className="primary" onClick={onCsv}>
+          이 아이디 CSV
+        </button>
+        <button type="button" onClick={onDeleteAll}>
+          이 아이디 기록 삭제
+        </button>
+        <button type="button" onClick={onHome}>
+          시작 화면
+        </button>
+      </div>
+      {sessions.length === 0 ? (
+        <p className="muted">기록이 없습니다.</p>
+      ) : (
+        <table className="result-table">
+          <caption>
+            {person.id}
+            {person.name ? ` · ${person.name}` : ""} 실측 {sessions.length}건
+          </caption>
+          <thead>
+            <tr>
+              <th>시작</th>
+              <th>세션</th>
+              <th>유효</th>
+              <th>안내</th>
+              <th>복귀</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {sessions.map((s) => (
+              <tr key={s.id}>
+                <td>{new Date(s.startedAt).toLocaleString("ko-KR")}</td>
+                <td>{(s.sessionMs / 1000).toFixed(0)}초</td>
+                <td>{(s.validMs / 1000).toFixed(0)}초</td>
+                <td>{s.coachingCount}</td>
+                <td>{s.recoveryCount}</td>
+                <td>
+                  <button type="button" onClick={() => onDeleteOne(s.id)}>
+                    삭제
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
 function Results({
   current,
   sessions,
+  person,
   onCsv,
   onDelete,
   onHome,
@@ -636,6 +855,7 @@ function Results({
 }: {
   current: StoredSession | null;
   sessions: StoredSession[];
+  person: Person;
   onCsv: () => void;
   onDelete: () => void;
   onHome: () => void;
@@ -667,6 +887,14 @@ function Results({
               </tr>
             </thead>
             <tbody>
+              <tr>
+                <td>개인 아이디</td>
+                <td>
+                  {s.personId || person.id}
+                  {s.personName ? ` · ${s.personName}` : ""}
+                </td>
+                <td>이 브라우저에 부여된 아이디</td>
+              </tr>
               <tr>
                 <td>모드</td>
                 <td>{s.demo ? "시연(시뮬레이션)" : "웹캠 실측"}</td>
@@ -757,7 +985,7 @@ function Results({
           CSV 내보내기
         </button>
         <button type="button" onClick={onDelete}>
-          기록 삭제
+          이 아이디 기록 삭제
         </button>
         <button type="button" onClick={onLearning}>
           학습 기록
@@ -766,7 +994,7 @@ function Results({
           시작 화면
         </button>
       </div>
-      <h3 style={{ marginTop: 16 }}>저장된 실측 (데모 제외)</h3>
+      <h3 style={{ marginTop: 16 }}>이 아이디의 실측</h3>
       {sessions.length === 0 ? (
         <p className="muted">없음</p>
       ) : (
