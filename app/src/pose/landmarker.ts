@@ -11,8 +11,21 @@ export type PoseFrame = {
   inferMs: number;
 };
 
+async function withRetry<T>(run: () => Promise<T>, attempts = 4): Promise<T> {
+  let last: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await run();
+    } catch (err) {
+      last = err;
+      await new Promise((r) => setTimeout(r, 400 * (i + 1) + Math.floor(Math.random() * 350)));
+    }
+  }
+  throw last;
+}
+
 export async function createPoseLandmarker(): Promise<PoseLandmarker> {
-  const vision = await FilesetResolver.forVisionTasks(WASM);
+  const vision = await withRetry(() => FilesetResolver.forVisionTasks(WASM));
   const options = {
     runningMode: "VIDEO" as const,
     numPoses: 2,

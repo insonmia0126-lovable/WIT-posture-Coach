@@ -512,7 +512,8 @@ function StartScreen({
       <p style={{ fontSize: "1.2rem" }}>당신의 자세 변화를 살피는 개인 코치</p>
       <p className="notice">
         카메라 프레임과 좌표는 이 브라우저에서만 처리합니다. 영상과 사진은 저장하지 않습니다. 결과 기록은
-        사용자 브라우저(localStorage)에만 남습니다.
+        사용자 브라우저(localStorage)에만 남습니다. 같은 주소를 여러 사람이 동시에 열어도 각자 기기에서
+        따로 측정합니다.
       </p>
       {error && <p className="error">{error}</p>}
       <div className="row" style={{ margin: "1rem 0" }}>
