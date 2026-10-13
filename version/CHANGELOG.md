@@ -4,7 +4,7 @@
 
 ## [Unreleased]
 
-아직 태그되지 않은 `main` 작업은 여기에 적습니다. 다음 릴리스 때 `v0.x.md`로 옮깁니다.
+다음 릴리스에 넣을 작업은 여기에 적습니다.
 
 ## [v0.2] — 2026-10-13
 
@@ -17,6 +17,9 @@
 - 세션 결과 표, 개인 코치 가이드, CSV
 - 시연 모드에서 실시간 웹캠 미리보기
 - 기준 등록 7초, 이탈 지속 20초, 반복 안내 3분 (시연은 단축)
+- 버전 이력 `version/`, 학습 기록 `learning/`
+- Windows 실행 `start_windows.bat`
+- 공개 사이트 https://insonmia0126-lovable.github.io/WIT-posture-Coach/
 
 ### 변경
 - 주 시연 경로를 Python GUI에서 웹앱으로 이동
