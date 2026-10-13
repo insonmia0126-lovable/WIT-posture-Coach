@@ -102,6 +102,33 @@ export default function App() {
     return modelPromise.current as Promise<NonNullable<typeof landmarkerRef.current>>;
   }
 
+  function attachStream(stream: MediaStream) {
+    streamRef.current = stream;
+    const bind = () => {
+      const el = videoRef.current;
+      if (!el) return;
+      el.srcObject = stream;
+      el.muted = true;
+      el.playsInline = true;
+      void el.play().catch(() => {});
+    };
+    bind();
+    requestAnimationFrame(bind);
+  }
+
+  async function openCamera(): Promise<MediaStream> {
+    const constraints: MediaStreamConstraints = {
+      audio: false,
+      video: deviceId
+        ? { deviceId: { exact: deviceId }, width: { ideal: 960 }, height: { ideal: 540 } }
+        : { facingMode: "user", width: { ideal: 960 }, height: { ideal: 540 } },
+    };
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    attachStream(stream);
+    void listCameras().then(setCameras);
+    return stream;
+  }
+
   async function startWebcam() {
     setError("");
     setDemo(false);
@@ -113,24 +140,9 @@ export default function App() {
     setSnap(engine.startSession(0, false));
     const modelTask = ensureModel();
     try {
-      const constraints: MediaStreamConstraints = {
-        audio: false,
-        video: deviceId
-          ? { deviceId: { exact: deviceId }, width: { ideal: 960 }, height: { ideal: 540 } }
-          : { facingMode: "user", width: { ideal: 960 }, height: { ideal: 540 } },
-      };
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      streamRef.current = stream;
+      await openCamera();
       setCamStatus("");
-      requestAnimationFrame(() => {
-        const el = videoRef.current;
-        if (el) {
-          el.srcObject = stream;
-          void el.play();
-        }
-        startLoop(false);
-      });
-      void listCameras().then(setCameras);
+      startLoop(false);
       await modelTask;
     } catch (e) {
       setCamStatus("");
@@ -139,7 +151,7 @@ export default function App() {
     }
   }
 
-  function startDemo() {
+  async function startDemo() {
     setError("");
     setDemo(true);
     demoRef.current = true;
@@ -147,9 +159,18 @@ export default function App() {
     t0.current = performance.now();
     demoT0.current = performance.now();
     setSnap(engine.startSession(0, true));
-    engine.beginCalibration(0);
+    setCamStatus("웹캠을 켜는 중…");
     setView("live");
-    requestAnimationFrame(() => startLoop(true));
+    const modelTask = ensureModel().catch(() => null);
+    try {
+      await openCamera();
+      setCamStatus("");
+    } catch {
+      setCamStatus("웹캠을 열 수 없어 시연 데이터로 진행합니다. 권한을 허용하면 다시 시작해 주세요.");
+    }
+    engine.beginCalibration(0);
+    startLoop(true);
+    await modelTask;
   }
 
   function startLoop(isDemo: boolean) {
@@ -164,20 +185,15 @@ export default function App() {
           lastInfer.current = t;
           try {
             let points = null;
-            let inferMs = 0;
-            let poseCount = 1;
-            if (isDemo) {
-              const sim = simulatedPose(performance.now() - demoT0.current);
-              points = sim.points;
-              poseCount = 1;
-              inferMs = 4;
-              setSnap(engine.feed({ t, points: sim.points, poseCount }, inferMs));
-            } else if (v && landmarkerRef.current && v.readyState >= 2) {
+            const liveReady = Boolean(v && landmarkerRef.current && v.readyState >= 2 && v.videoWidth > 0);
+            if (liveReady && v && landmarkerRef.current) {
               const frame = detectPose(landmarkerRef.current, v, performance.now());
               points = frame.points;
-              poseCount = frame.poseCount;
-              inferMs = frame.inferMs;
-              setSnap(engine.feed({ t, points: frame.points, poseCount }, inferMs));
+              setSnap(engine.feed({ t, points: frame.points, poseCount: frame.poseCount }, frame.inferMs));
+            } else if (isDemo) {
+              const sim = simulatedPose(performance.now() - demoT0.current);
+              points = sim.points;
+              setSnap(engine.feed({ t, points: sim.points, poseCount: 1 }, 4));
             }
             fpsWindow.current.push(performance.now());
             fpsWindow.current = fpsWindow.current.filter((x) => performance.now() - x < 1000);
@@ -286,7 +302,7 @@ export default function App() {
       {(view === "live" || view === "settings") && (
         <div style={{ display: view === "live" ? "block" : "none" }}>
           {demo && (
-            <div className="banner-sim">시연 모드 · 시뮬레이션 데이터 · 단축 타이머 · 실측 기록과 섞지 않음</div>
+            <div className="banner-sim">시연 모드 · 웹캠 실시간 미리보기 · 단축 타이머 · 실측 기록과 섞지 않음</div>
           )}
           <p className="muted">
             노트북을 안정된 위치에 놓고 화면 각도를 고정해 주세요. 얼굴과 양쪽 어깨가 보이도록 앉은 뒤 기준
