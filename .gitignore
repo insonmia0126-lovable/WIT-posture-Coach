@@ -7,3 +7,5 @@ logs/
 requirements.lock.txt
 .DS_Store
 *.zip
+app/node_modules/
+app/dist/
