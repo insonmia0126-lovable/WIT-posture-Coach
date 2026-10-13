@@ -9,8 +9,10 @@
 > **목격자의 제보: 화면에 조금 가까워지셨습니다.**
 
 ## 0.웹에서 바로 실행
+
+<img src="./docs/wit-web-qr.png" alt="목격자 웹 실행 QR 코드" width="220" />
+
 ## https://insonmia0126-lovable.github.io/WIT-posture-Coach/ ##
-## <details><summary>QR 코드</summary><img src="./docs/wit-web-qr.png" alt="목격자 웹 실행 QR 코드" width="220" /></details>
 
 -Chrome에서 위 주소를 연 뒤 웹캠 시작을 누르고 카메라 권한을 허용하세요. 
 -또는  QR코드를 카메라로 찍어서 웹사이트와 바로 연결하세요
@@ -181,7 +183,6 @@ v0.2에서 쓰는 구성입니다.
 
 버전 이력은 [`version/`](./version/) 폴더에서 봅니다. (`v0.1`, `v0.2`, 이후 릴리스)  
 결과에서 배운 점은 [`learning/`](./learning/)에 버전을 붙여 남깁니다.
-
 
 ## 실행 (노트북 · Windows Chrome · v0.2)
 
