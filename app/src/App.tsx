@@ -12,9 +12,19 @@ import {
 import { drawOverlay } from "./overlay";
 import { createPoseLandmarker, detectPose } from "./pose/landmarker";
 import { personalCoachLines } from "./coachGuide";
+import {
+  deleteLearning,
+  entryFromSession,
+  learningToMarkdown,
+  loadLearning,
+  saveLearning,
+  updateLearningMemo,
+  type LearningEntry,
+} from "./learningStore";
 import { deleteSessions, loadSessions, saveSession, toCsv, type StoredSession } from "./storage";
+import { APP_VERSION } from "./version";
 
-type View = "start" | "live" | "results" | "settings";
+type View = "start" | "live" | "results" | "settings" | "learning";
 const STATE_KO: Record<AppState, string> = {
   ready: "준비",
   calibrating: "기준 자세 등록 중",
@@ -41,6 +51,7 @@ export default function App() {
   const [camStatus, setCamStatus] = useState("");
   const modelPromise = useRef<Promise<unknown> | null>(null);
   const [sessions, setSessions] = useState<StoredSession[]>(() => loadSessions());
+  const [learning, setLearning] = useState<LearningEntry[]>(() => loadLearning());
   const [result, setResult] = useState<StoredSession | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -248,6 +259,8 @@ export default function App() {
     }
     setResult(row);
     setSessions(loadSessions());
+    saveLearning(entryFromSession(row));
+    setLearning(loadLearning());
     setView("results");
   }
 
@@ -268,11 +281,13 @@ export default function App() {
         <StartScreen
           error={error}
           sessions={sessions}
+          learningCount={learning.length}
           cameras={cameras}
           deviceId={deviceId}
           onDevice={setDeviceId}
           onWebcam={startWebcam}
           onDemo={startDemo}
+          onLearning={() => setView("learning")}
           onRefreshCams={async () => setCameras(await listCameras())}
         />
       )}
@@ -281,7 +296,7 @@ export default function App() {
         <>
           <header className="row" style={{ justifyContent: "space-between", marginBottom: 12 }}>
             <div>
-              <div className="kicker">목격자 W.I.T · v0.2</div>
+              <div className="kicker">목격자 W.I.T · v{APP_VERSION}</div>
               <strong>당신의 자세 변화를 살피는 개인 코치</strong>
             </div>
             <div className="row">
@@ -293,6 +308,9 @@ export default function App() {
               </button>
               <button type="button" onClick={() => setView("results")}>
                 결과
+              </button>
+              <button type="button" onClick={() => setView("learning")}>
+                학습 기록
               </button>
             </div>
           </header>
@@ -434,6 +452,29 @@ export default function App() {
             setSessions([]);
           }}
           onHome={() => setView("start")}
+          onLearning={() => setView("learning")}
+        />
+      )}
+
+      {view === "learning" && (
+        <LearningScreen
+          entries={learning}
+          onMemo={(id, memo) => {
+            updateLearningMemo(id, memo);
+            setLearning(loadLearning());
+          }}
+          onExport={() => {
+            const blob = new Blob([learningToMarkdown(loadLearning())], { type: "text/markdown;charset=utf-8" });
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = "wit-learning.md";
+            a.click();
+          }}
+          onDelete={() => {
+            deleteLearning();
+            setLearning([]);
+          }}
+          onHome={() => setView("start")}
         />
       )}
     </div>
@@ -443,27 +484,31 @@ export default function App() {
 function StartScreen({
   error,
   sessions,
+  learningCount,
   cameras,
   deviceId,
   onDevice,
   onWebcam,
   onDemo,
+  onLearning,
   onRefreshCams,
 }: {
   error: string;
   sessions: StoredSession[];
+  learningCount: number;
   cameras: MediaDeviceInfo[];
   deviceId: string;
   onDevice: (id: string) => void;
   onWebcam: () => void;
   onDemo: () => void;
+  onLearning: () => void;
   onRefreshCams: () => void;
 }) {
   return (
     <div>
       <p className="kicker">온디바이스 · 영상 외부 전송 없음</p>
       <h1>목격자 W.I.T</h1>
-      <p className="kicker">v0.2 · 노트북 웹캠 프로토타입</p>
+      <p className="kicker">v{APP_VERSION} · 노트북 웹캠 프로토타입</p>
       <p style={{ fontSize: "1.2rem" }}>당신의 자세 변화를 살피는 개인 코치</p>
       <p className="notice">
         카메라 프레임과 좌표는 이 브라우저에서만 처리합니다. 영상과 사진은 저장하지 않습니다. 결과 기록은
@@ -476,6 +521,9 @@ function StartScreen({
         </button>
         <button type="button" onClick={onDemo}>
           데모 시작
+        </button>
+        <button type="button" onClick={onLearning}>
+          학습 기록 ({learningCount})
         </button>
         <button type="button" onClick={onRefreshCams}>
           카메라 목록
@@ -583,12 +631,14 @@ function Results({
   onCsv,
   onDelete,
   onHome,
+  onLearning,
 }: {
   current: StoredSession | null;
   sessions: StoredSession[];
   onCsv: () => void;
   onDelete: () => void;
   onHome: () => void;
+  onLearning: () => void;
 }) {
   const s = current;
   const ratio = s && s.validMs > 0 ? `${((s.inRangeMs / s.validMs) * 100).toFixed(1)}%` : "—";
@@ -708,6 +758,9 @@ function Results({
         <button type="button" onClick={onDelete}>
           기록 삭제
         </button>
+        <button type="button" onClick={onLearning}>
+          학습 기록
+        </button>
         <button type="button" onClick={onHome}>
           시작 화면
         </button>
@@ -726,6 +779,92 @@ function Results({
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+function LearningScreen({
+  entries,
+  onMemo,
+  onExport,
+  onDelete,
+  onHome,
+}: {
+  entries: LearningEntry[];
+  onMemo: (id: string, memo: string) => void;
+  onExport: () => void;
+  onDelete: () => void;
+  onHome: () => void;
+}) {
+  return (
+    <div className="card">
+      <h2>학습 기록</h2>
+      <p className="muted">
+        세션을 종료하면 결과와 개인 코치 문구가 이 브라우저에 버전(v{APP_VERSION})과 함께 쌓입니다. 팀 공유는
+        마크다운으로 보낸 뒤 저장소 <code>learning/entries/</code>에 붙입니다. 영상은 저장하지 않습니다.
+      </p>
+      <p className="legal-warn">의료 진단이 아닙니다</p>
+      <p className="legal-warn">목격자는 질환을 진단하지 않습니다</p>
+      <div className="row" style={{ margin: "0.8rem 0" }}>
+        <button type="button" className="primary" onClick={onExport}>
+          마크다운 내보내기
+        </button>
+        <button type="button" onClick={onDelete}>
+          학습 기록 삭제
+        </button>
+        <button type="button" onClick={onHome}>
+          시작 화면
+        </button>
+      </div>
+      {entries.length === 0 ? (
+        <p className="muted">아직 학습 기록이 없습니다. 측정을 종료하면 여기에 남습니다.</p>
+      ) : (
+        entries.map((e) => {
+          const s = e.session;
+          const k = s.kindCounts ?? { head: 0, shoulder: 0, torso: 0 };
+          const ratio = s.validMs > 0 ? `${((s.inRangeMs / s.validMs) * 100).toFixed(1)}%` : "—";
+          return (
+            <article key={e.id} className="learn-card">
+              <header className="row" style={{ justifyContent: "space-between" }}>
+                <strong>v{e.appVersion}</strong>
+                <span className="muted">
+                  {s.demo ? "시연" : "웹캠"} · {new Date(e.savedAt).toLocaleString("ko-KR")}
+                </span>
+              </header>
+              <table className="result-table">
+                <tbody>
+                  <tr>
+                    <td>유효 / 불가</td>
+                    <td>
+                      {(s.validMs / 1000).toFixed(1)}초 / {(s.unavailableMs / 1000).toFixed(1)}초
+                    </td>
+                    <td>기준 유지 {ratio}</td>
+                  </tr>
+                  <tr>
+                    <td>안내</td>
+                    <td>{s.coachingCount}회</td>
+                    <td>
+                      고개 {k.head} · 어깨 {k.shoulder} · 상체 {k.torso} · 복귀 {s.recoveryCount}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <ul>
+                {e.coachLines.map((line, i) => (
+                  <li key={i}>{line}</li>
+                ))}
+              </ul>
+              <label className="muted">메모 (환경, 다음에 바꿀 점)</label>
+              <textarea
+                rows={3}
+                defaultValue={e.memo}
+                onBlur={(ev) => onMemo(e.id, ev.target.value)}
+                placeholder="예: 오후 형광등, 화면을 낮췄더니 고개 안내가 늘었다"
+              />
+            </article>
+          );
+        })
       )}
     </div>
   );

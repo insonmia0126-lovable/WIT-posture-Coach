@@ -9,6 +9,8 @@
 
 전체 연표는 [CHANGELOG.md](./CHANGELOG.md)를 봅니다.
 
+세션 결과에서 배운 내용은 버전과 별도로 [`learning/`](../learning/)에 모읍니다.
+
 ## 과거 버전 코드 보기
 
 ```bash
