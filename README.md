@@ -9,7 +9,7 @@
 > **목격자의 제보: 화면에 조금 가까워지셨습니다.**
 
 ## 0.웹에서 바로 실행
-##https://insonmia0126-lovable.github.io/WIT-posture-Coach/##
+## https://insonmia0126-lovable.github.io/WIT-posture-Coach/ ##
 
 -Chrome에서 위 주소를 연 뒤 웹캠 시작을 누르고 카메라 권한을 허용하세요. 
 
