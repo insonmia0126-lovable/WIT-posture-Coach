@@ -12,7 +12,9 @@
 https://insonmia0126-lovable.github.io/WIT-posture-Coach/
 
 -Chrome에서 위 주소를 연 뒤 웹캠 시작을 누르고 카메라 권한을 허용하세요. 
+
 -HTTPS라서 별도 서버 없이 브라우저에서 동작합니다. 
+
 -카메라가 없으면 데모 시작을 사용합니다.
 
 ---
