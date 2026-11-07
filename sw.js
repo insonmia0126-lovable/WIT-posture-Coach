@@ -1,7 +1,7 @@
 /* Classroom static cache. Pose math stays on each device.
    Heavy model/WASM files are stored after the first successful download
    and retried with jitter if the host is briefly busy. */
-const CACHE = "wit-static-v2";
+const CACHE = "wit-static-v3";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
