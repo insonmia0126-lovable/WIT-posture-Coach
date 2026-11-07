@@ -129,13 +129,14 @@ export default function App() {
     const bind = () => {
       const el = videoRef.current;
       if (!el) return;
-      el.srcObject = stream;
+      if (el.srcObject !== stream) el.srcObject = stream;
       el.muted = true;
       el.playsInline = true;
-      void el.play().catch(() => {});
+      if (el.paused) void el.play().catch(() => {});
     };
     bind();
     requestAnimationFrame(bind);
+    window.setTimeout(bind, 250);
   }
 
   async function openCamera(): Promise<MediaStream> {
@@ -197,34 +198,53 @@ export default function App() {
 
   function startLoop(isDemo: boolean) {
     cancelAnimationFrame(loopRef.current);
+    let lastPoints: ReturnType<typeof simulatedPose>["points"] | null = null;
     const tick = () => {
       const v = videoRef.current;
       const c = canvasRef.current;
       const t = now();
-      if (engine.state !== "paused" && !hiddenRef.current) {
-        if (!inferLock.current && t - lastInfer.current >= engine.settings.inferEveryMs) {
-          inferLock.current = true;
-          lastInfer.current = t;
-          try {
-            let points = null;
-            const liveReady = Boolean(v && landmarkerRef.current && v.readyState >= 2 && v.videoWidth > 0);
-            if (liveReady && v && landmarkerRef.current) {
-              const frame = detectPose(landmarkerRef.current, v, performance.now());
-              points = frame.points;
-              setSnap(engine.feed({ t, points: frame.points, poseCount: frame.poseCount }, frame.inferMs));
-            } else if (isDemo) {
-              const sim = simulatedPose(performance.now() - demoT0.current);
-              points = sim.points;
-              setSnap(engine.feed({ t, points: sim.points, poseCount: 1 }, 4));
+      try {
+        if (engine.state !== "paused" && !hiddenRef.current) {
+          if (!inferLock.current && t - lastInfer.current >= engine.settings.inferEveryMs) {
+            inferLock.current = true;
+            lastInfer.current = t;
+            try {
+              const liveReady = Boolean(v && landmarkerRef.current && v.readyState >= 2 && v.videoWidth > 0);
+              if (liveReady && v && landmarkerRef.current) {
+                try {
+                  const frame = detectPose(landmarkerRef.current, v, performance.now());
+                  lastPoints = frame.points;
+                  setSnap(engine.feed({ t, points: frame.points, poseCount: frame.poseCount }, frame.inferMs));
+                } catch {
+                  lastPoints = null;
+                  const broken = landmarkerRef.current;
+                  landmarkerRef.current = null;
+                  modelPromise.current = null;
+                  setModelReady(false);
+                  try {
+                    broken?.close();
+                  } catch {
+                    /* 이미 닫힌 인식기는 무시 */
+                  }
+                  void ensureModel();
+                }
+              } else if (isDemo && !liveReady) {
+                const sim = simulatedPose(performance.now() - demoT0.current);
+                lastPoints = sim.points;
+                setSnap(engine.feed({ t, points: sim.points, poseCount: 1 }, 4));
+              }
+              fpsWindow.current.push(performance.now());
+              fpsWindow.current = fpsWindow.current.filter((x) => performance.now() - x < 1000);
+              setInferFps(fpsWindow.current.length);
+            } finally {
+              inferLock.current = false;
             }
-            fpsWindow.current.push(performance.now());
-            fpsWindow.current = fpsWindow.current.filter((x) => performance.now() - x < 1000);
-            setInferFps(fpsWindow.current.length);
-            if (c) drawOverlay(c, v, points, landmarksRef.current);
-          } finally {
-            inferLock.current = false;
           }
         }
+        if (streamRef.current && v && v.srcObject !== streamRef.current) attachStream(streamRef.current);
+        if (c) drawOverlay(c, v, lastPoints, landmarksRef.current);
+      } catch {
+        /* 한 프레임 실패로 루프를 끊지 않는다 */
       }
       loopRef.current = requestAnimationFrame(tick);
     };
@@ -234,7 +254,11 @@ export default function App() {
   function stopCameraTracks() {
     streamRef.current?.getTracks().forEach((tr) => tr.stop());
     streamRef.current = null;
-    if (videoRef.current) videoRef.current.srcObject = null;
+    const el = videoRef.current;
+    if (el) {
+      el.pause();
+      el.srcObject = null;
+    }
   }
 
   function endSession() {
@@ -351,14 +375,14 @@ export default function App() {
         </>
       )}
 
-      {(view === "live" || view === "settings") && (
-        <div style={{ display: view === "live" ? "block" : "none" }}>
+      <div style={{ display: view === "live" ? "block" : "none" }} aria-hidden={view !== "live"}>
           {demo && (
             <div className="banner-sim">시연 모드 · 웹캠 실시간 미리보기 · 단축 타이머 · 실측 기록과 섞지 않음</div>
           )}
           <p className="muted">
             노트북을 안정된 위치에 놓고 화면 각도를 고정해 주세요. 얼굴과 양쪽 어깨가 보이도록 앉은 뒤 기준
-            자세를 등록하세요. 기준 등록은 7초입니다. 노트북 위치나 화면 각도를 바꾸면 재등록하세요.
+            자세를 등록하세요. 기준 등록은 7초입니다. 업무 중 작은 고개·어깨 움직임은 허용 범위 안에 둡니다.
+            노트북 위치나 화면 각도를 바꾸면 재등록하세요.
           </p>
           <div className="live-grid">
             <div>
@@ -463,8 +487,7 @@ export default function App() {
               )}
             </div>
           </div>
-        </div>
-      )}
+      </div>
 
       {view === "settings" && (
         <SettingsPanel

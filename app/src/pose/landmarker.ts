@@ -44,9 +44,18 @@ export async function createPoseLandmarker(): Promise<PoseLandmarker> {
   );
 }
 
+let lastVideoTs = 0;
+
+/** VIDEO 모드는 직전보다 큰 시각만 받는다. 세션을 다시 시작해도 같은 값을 넘기지 않는다. */
+export function nextVideoTimestamp(nowMs: number): number {
+  const ts = Math.max(nowMs, lastVideoTs + 1);
+  lastVideoTs = ts;
+  return ts;
+}
+
 export function detectPose(landmarker: PoseLandmarker, video: HTMLVideoElement, timestampMs: number): PoseFrame {
   const t0 = performance.now();
-  const result = landmarker.detectForVideo(video, timestampMs);
+  const result = landmarker.detectForVideo(video, nextVideoTimestamp(timestampMs));
   const inferMs = performance.now() - t0;
   const poses = result.landmarks ?? [];
   const first = poses[0] as NormalizedLandmark[] | undefined;
