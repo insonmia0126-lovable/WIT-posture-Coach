@@ -73,9 +73,9 @@ export default function App() {
   const lastInfer = useRef(0);
   const fpsWindow = useRef<number[]>([]);
   const loopRef = useRef(0);
+  const loopTimer = useRef(0);
   const t0 = useRef(performance.now());
   const demoT0 = useRef(0);
-  const hiddenRef = useRef(false);
   const landmarksRef = useRef(true);
   const demoRef = useRef(false);
 
@@ -89,14 +89,12 @@ export default function App() {
 
   useEffect(() => {
     const onVis = () => {
-      hiddenRef.current = document.hidden;
-      if (document.hidden && engine.state !== "paused" && view === "live") {
-        setSnap(engine.pause(now()));
-      }
+      const el = videoRef.current;
+      if (document.hidden && el && streamRef.current) void el.play().catch(() => {});
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, [engine, view]);
+  }, []);
 
   function now() {
     return performance.now() - t0.current;
@@ -196,21 +194,31 @@ export default function App() {
     await modelTask;
   }
 
-  function startLoop(isDemo: boolean) {
+  function stopLoop() {
     cancelAnimationFrame(loopRef.current);
+    window.clearInterval(loopTimer.current);
+    loopTimer.current = 0;
+  }
+
+  function startLoop(isDemo: boolean) {
+    stopLoop();
     let lastPoints: ReturnType<typeof simulatedPose>["points"] | null = null;
+    let lastFrameCount = -1;
     const tick = () => {
       const v = videoRef.current;
       const c = canvasRef.current;
       const t = now();
       try {
-        if (engine.state !== "paused" && !hiddenRef.current) {
+        if (engine.state !== "paused") {
           if (!inferLock.current && t - lastInfer.current >= engine.settings.inferEveryMs) {
             inferLock.current = true;
             lastInfer.current = t;
             try {
               const liveReady = Boolean(v && landmarkerRef.current && v.readyState >= 2 && v.videoWidth > 0);
-              if (liveReady && v && landmarkerRef.current) {
+              const decoded = v ? (v as HTMLVideoElement & { webkitDecodedFrameCount?: number }).webkitDecodedFrameCount : undefined;
+              const frameMoved = decoded == null || decoded !== lastFrameCount;
+              if (decoded != null) lastFrameCount = decoded;
+              if (liveReady && v && landmarkerRef.current && frameMoved) {
                 try {
                   const frame = detectPose(landmarkerRef.current, v, performance.now());
                   lastPoints = frame.points;
@@ -246,9 +254,15 @@ export default function App() {
       } catch {
         /* 한 프레임 실패로 루프를 끊지 않는다 */
       }
-      loopRef.current = requestAnimationFrame(tick);
     };
-    loopRef.current = requestAnimationFrame(tick);
+    const draw = () => {
+      const v = videoRef.current;
+      const c = canvasRef.current;
+      if (c) drawOverlay(c, v, lastPoints, landmarksRef.current);
+      loopRef.current = requestAnimationFrame(draw);
+    };
+    loopTimer.current = window.setInterval(tick, Math.max(200, engine.settings.inferEveryMs));
+    loopRef.current = requestAnimationFrame(draw);
   }
 
   function stopCameraTracks() {
@@ -262,7 +276,7 @@ export default function App() {
   }
 
   function endSession() {
-    cancelAnimationFrame(loopRef.current);
+    stopLoop();
     stopCameraTracks();
     const s = engine.snapshot(now());
     const kindCounts = { head: 0, shoulder: 0, torso: 0 };
@@ -382,7 +396,8 @@ export default function App() {
           <p className="muted">
             노트북을 안정된 위치에 놓고 화면 각도를 고정해 주세요. 얼굴과 양쪽 어깨가 보이도록 앉은 뒤 기준
             자세를 등록하세요. 기준 등록은 7초입니다. 업무 중 작은 고개·어깨 움직임은 허용 범위 안에 둡니다.
-            노트북 위치나 화면 각도를 바꾸면 재등록하세요.
+            창을 최소화하거나 다른 작업을 해도 종료를 누르기 전까지 측정은 유지됩니다. 노트북 위치나 화면
+            각도를 바꾸면 재등록하세요.
           </p>
           <div className="live-grid">
             <div>
