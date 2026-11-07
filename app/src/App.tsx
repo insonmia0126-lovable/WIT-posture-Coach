@@ -366,12 +366,12 @@ export default function App() {
 
       {view !== "start" && (
         <>
-          <header className="row" style={{ justifyContent: "space-between", marginBottom: 12 }}>
+          <header className="topbar">
             <div>
               <div className="kicker">목격자 W.I.T · v{APP_VERSION}</div>
               <strong>당신의 자세 변화를 살피는 개인 코치</strong>
             </div>
-            <div className="row">
+            <nav className="nav">
               <button type="button" onClick={() => setView("settings")}>
                 설정
               </button>
@@ -384,7 +384,7 @@ export default function App() {
               <button type="button" onClick={() => setView("learning")}>
                 학습 기록
               </button>
-            </div>
+            </nav>
           </header>
         </>
       )}
@@ -617,11 +617,11 @@ function StartScreen({
   onRefreshCams: () => void;
 }) {
   return (
-    <div>
+    <div className="hero">
       <p className="kicker">온디바이스 · 영상 외부 전송 없음</p>
       <h1>목격자 W.I.T</h1>
-      <p className="kicker">v{APP_VERSION} · 노트북 웹캠 프로토타입</p>
-      <p style={{ fontSize: "1.2rem" }}>당신의 자세 변화를 살피는 개인 코치</p>
+      <p className="kicker">v{APP_VERSION} · 노트북 웹캠</p>
+      <p className="lede">당신의 자세 변화를 살피는 개인 코치</p>
       <p className="notice">
         카메라 프레임과 좌표는 이 브라우저에서만 처리합니다. 영상과 사진은 저장하지 않습니다. 결과 기록은
         사용자 브라우저(localStorage)에만 남습니다. 같은 주소를 여러 사람이 동시에 열어도 각자 기기에서
@@ -636,7 +636,7 @@ function StartScreen({
         onHistory={onHistory}
       />
       {error && <p className="error">{error}</p>}
-      <div className="row" style={{ margin: "1rem 0" }}>
+      <div className="row actions">
         <button type="button" className="primary" onClick={onWebcam}>
           웹캠 시작
         </button>
@@ -692,7 +692,10 @@ function SettingsPanel({
   deviceId: string;
   onDevice: (id: string) => void;
 }) {
-  const set = (k: keyof CoachSettings, v: number | boolean) => onChange({ ...settings, [k]: v });
+  const set = (k: keyof CoachSettings, v: number | boolean) => {
+    if (typeof v === "number" && !Number.isFinite(v)) return;
+    onChange({ ...settings, [k]: v });
+  };
   return (
     <div className="card">
       <h2>시제품 설정</h2>
@@ -766,7 +769,7 @@ function PersonCard({
   return (
     <div className="card" style={{ margin: "1rem 0" }}>
       <p className="kicker">개인 아이디</p>
-      <p style={{ fontSize: "1.6rem", fontWeight: 700, letterSpacing: "0.04em", margin: "0.2rem 0" }}>{person.id}</p>
+      <p className="person-id">{person.id}</p>
       <p className="muted">이 브라우저에 부여된 아이디입니다. 측정 이력은 이 아이디로만 이 기기에 남습니다.</p>
       <div className="row">
         <label>
