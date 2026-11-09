@@ -1,5 +1,5 @@
-import { LM } from "./engine/metrics";
-import type { Point } from "./engine/types";
+import { cameraFaceLandmarks, computeMetrics, LM } from "./engine/metrics";
+import type { CameraPosition, Point } from "./engine/types";
 
 function clamp(n: number, a: number, b: number) {
   return Math.max(a, Math.min(b, n));
@@ -49,6 +49,8 @@ export function drawOverlay(
   video: HTMLVideoElement | null,
   points: Point[] | null,
   showLandmarks: boolean,
+  cameraPosition: CameraPosition = "front",
+  minVisibility = 0.55,
 ) {
   const w = video?.videoWidth || canvas.clientWidth || 960;
   const h = video?.videoHeight || canvas.clientHeight || 540;
@@ -58,16 +60,17 @@ export function drawOverlay(
   if (!ctx) return;
   ctx.clearRect(0, 0, w, h);
 
-  const hasPose = Boolean(showLandmarks && points && points.length >= 13 && points[LM.LEFT_SHOULDER] && points[LM.RIGHT_SHOULDER]);
+  const hasPose = Boolean(showLandmarks && points && computeMetrics(points, minVisibility, cameraPosition).valid);
 
   if (hasPose && points) {
     const ls = points[LM.LEFT_SHOULDER];
     const rs = points[LM.RIGHT_SHOULDER];
-    const le = points[LM.LEFT_EYE];
-    const re = points[LM.RIGHT_EYE];
+    const side = cameraFaceLandmarks(cameraPosition);
+    const le = points[cameraPosition === "front" ? LM.LEFT_EYE : side.ear];
+    const re = points[cameraPosition === "front" ? LM.RIGHT_EYE : side.eye];
     const nose = points[LM.NOSE];
     const shoulderPx = Math.hypot((rs.x - ls.x) * w, (rs.y - ls.y) * h);
-    const facePx = Math.hypot((re.x - le.x) * w, (re.y - le.y) * h);
+    const facePx = Math.hypot((re.x - le.x) * w, (re.y - le.y) * h) * (cameraPosition === "front" ? 1 : 2);
     const lineW = clamp(shoulderPx * 0.02, 2, 6);
     const jointR = clamp(shoulderPx * 0.028, 3.5, 9);
     const faceRx = clamp(facePx * 1.35, 28, w * 0.22);
@@ -87,6 +90,11 @@ export function drawOverlay(
 
     strokeLine(ctx, le.x * w, le.y * h, re.x * w, re.y * h, "#FFE500", lineW);
     strokeLine(ctx, ls.x * w, ls.y * h, rs.x * w, rs.y * h, "#00F0A8", lineW);
+    if (cameraPosition !== "front") {
+      const ear = points[side.ear];
+      const shoulder = points[side.shoulder];
+      strokeLine(ctx, ear.x * w, ear.y * h, shoulder.x * w, shoulder.y * h, "#48CFFF", lineW);
+    }
     dot(ctx, le.x * w, le.y * h, jointR * 0.75, "#FFE500");
     dot(ctx, re.x * w, re.y * h, jointR * 0.75, "#FFE500");
     dot(ctx, nose.x * w, nose.y * h, jointR * 0.55, "#FFFFFF");

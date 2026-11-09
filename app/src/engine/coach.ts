@@ -1,13 +1,17 @@
 import { baselineFromFrames, computeMetrics, deltas } from "./metrics";
+import { cameraPositionGuide, cameraPositionLabel } from "./cameraPosition";
+import { MetricSmoother } from "./smoothing";
 import {
   DEFAULT_SETTINGS,
   type AppState,
   type Baseline,
+  type CameraPosition,
   type ChangeKind,
   type CoachSettings,
   type CoachSnapshot,
   type Metrics,
   type PoseSample,
+  type PauseReason,
 } from "./types";
 
 function abs(n: number) {
@@ -31,6 +35,14 @@ export class CoachEngine {
   recoveryStart: number | null = null;
   calibStart: number | null = null;
   calibFrames: Metrics[] = [];
+  calibrationStableMs = 0;
+  private calibrationAnchor: Metrics | null = null;
+  private calibrationSmoother = new MetricSmoother();
+  private calibrationChange: { anchor: Metrics; lastT: number; stableMs: number; frames: Metrics[] } | null = null;
+  private lastCalibrationT: number | null = null;
+  private smoother = new MetricSmoother();
+  private totalPausedMs = 0;
+  pauseReason: PauseReason | null = null;
   lastT = 0;
   sessionStart = 0;
   validMs = 0;
@@ -52,6 +64,16 @@ export class CoachEngine {
     this.lastT = t;
     this.state = "ready";
     this.baseline = null;
+    this.lastMetrics = null;
+    this.lastDeltas = null;
+    this.changeKind = null;
+    this.lastInferMs = 0;
+    this.pausedAt = null;
+    this.prePause = "ready";
+    this.pauseReason = null;
+    this.totalPausedMs = 0;
+    this.resetCalibration();
+    this.smoother.reset();
     this.coachingCount = 0;
     this.recoveryCount = 0;
     this.recoveryTimes = [];
@@ -67,7 +89,7 @@ export class CoachEngine {
     this.events = [{ t, state: "ready" }];
     this.message = demo
       ? "시뮬레이션 데이터로 시연합니다."
-      : "얼굴과 양쪽 어깨가 보이도록 앉은 뒤 기준 자세를 등록하세요.";
+      : cameraPositionGuide(this.settings.cameraPosition);
     return this.snapshot(t);
   }
 
@@ -75,24 +97,60 @@ export class CoachEngine {
     if (this.state === "paused") return this.snapshot(t);
     this.state = "calibrating";
     this.calibStart = t;
-    this.calibFrames = [];
+    this.resetCalibration();
+    this.smoother.reset();
     this.baseline = null;
+    this.lastDeltas = null;
+    this.changeKind = null;
     this.sustainStart = null;
     this.recoveryStart = null;
     this.pendingCoachT = null;
-    this.message = "기준 자세를 기록하는 중입니다. 정면을 편하게 바라봐 주세요.";
+    this.message = `${cameraPositionLabel(this.settings.cameraPosition)} 기준을 기록하는 중입니다. 평소 업무 화면을 편하게 바라봐 주세요.`;
     this.pushEvent(t);
     return this.snapshot(t);
   }
 
-  pause(t: number) {
+  setCameraPosition(position: CameraPosition, t: number) {
+    if (position === this.settings.cameraPosition && (!this.baseline || this.baseline.cameraPosition === position)) {
+      return this.snapshot(t);
+    }
+    this.settings = { ...this.settings, cameraPosition: position };
+    this.state = "ready";
+    this.baseline = null;
+    this.lastMetrics = null;
+    this.lastDeltas = null;
+    this.changeKind = null;
+    this.resetCalibration();
+    this.smoother.reset();
+    this.calibStart = null;
+    this.sustainStart = null;
+    this.recoveryStart = null;
+    this.pendingCoachT = null;
+    if (this.pausedAt != null) this.totalPausedMs += Math.max(0, t - this.pausedAt);
+    this.pausedAt = null;
+    this.pauseReason = null;
+    this.prePause = "ready";
+    this.message = "카메라 위치가 변경되었습니다. 새 위치에서 기준을 다시 등록하세요.";
+    this.pushEvent(t);
+    return this.snapshot(t);
+  }
+
+  pause(t: number, reason: PauseReason = "manual") {
     if (this.state === "paused") return this.snapshot(t);
     this.prePause = this.state;
     this.state = "paused";
     this.pausedAt = t;
+    this.pauseReason = reason;
     this.sustainStart = null;
     this.recoveryStart = null;
-    this.message = "일시정지되었습니다. 중지된 시간은 지속 시간에 넣지 않습니다.";
+    this.pendingCoachT = null;
+    this.lastCalibrationT = null;
+    this.calibrationChange = null;
+    this.calibrationSmoother.reset();
+    this.smoother.reset();
+    this.message = reason === "hidden"
+      ? "다른 탭이나 최소화 상태여서 측정을 쉬고 있습니다. 이 시간은 측정·기준 등록·알림 시간에서 제외됩니다."
+      : "일시정지되었습니다. 측정 재개를 누르면 이어서 측정합니다. 중지된 시간은 기록에서 제외됩니다.";
     this.pushEvent(t);
     return this.snapshot(t);
   }
@@ -103,7 +161,12 @@ export class CoachEngine {
     if (this.state === "change_detected" || this.state === "coaching") {
       this.state = this.baseline ? "in_range" : "ready";
     }
+    if (this.pausedAt != null) this.totalPausedMs += Math.max(0, t - this.pausedAt);
     this.pausedAt = null;
+    this.pauseReason = null;
+    this.lastT = t;
+    this.lastCalibrationT = null;
+    this.smoother.reset();
     this.sustainStart = null;
     this.recoveryStart = null;
     this.message = "측정을 다시 시작합니다.";
@@ -113,20 +176,40 @@ export class CoachEngine {
 
   feed(sample: PoseSample, inferMs = 0): CoachSnapshot {
     const t = sample.t;
-    const dt = Math.max(0, Math.min(250, t - this.lastT));
+    const gap = t - this.lastT;
+    const maxGap = Math.max(500, this.settings.inferEveryMs * 3, inferMs * 2);
+    const continuous = gap >= 0 && gap <= maxGap;
+    const dt = continuous ? gap : 0;
     this.lastT = t;
     this.lastInferMs = inferMs;
 
-    if (this.state === "paused" || this.state === "ready") {
+    if (this.baseline && this.baseline.cameraPosition !== this.settings.cameraPosition) {
+      return this.setCameraPosition(this.settings.cameraPosition, t);
+    }
+    if (this.state === "paused") {
       return this.snapshot(t);
+    }
+    if (!continuous) {
+      this.lastCalibrationT = null;
+      this.calibrationChange = null;
+      this.calibrationSmoother.reset();
+      this.smoother.reset();
+      this.sustainStart = this.state === "change_detected" ? t : null;
+      this.recoveryStart = null;
     }
 
     if (sample.poseCount > 1) {
       return this.markUnavailable(t, dt, "여러 사람이 보입니다. 한 명만 들어오도록 해 주세요.");
     }
 
-    const m = computeMetrics(sample.points, this.settings.minVisibility);
+    let m = computeMetrics(sample.points, this.settings.minVisibility, this.settings.cameraPosition);
     this.lastMetrics = m;
+    if (this.state === "ready") {
+      this.message = m.valid
+        ? `${cameraPositionLabel(this.settings.cameraPosition)} 구도가 인식되었습니다. 평소 업무 화면을 보며 기준을 등록하세요.`
+        : `등록 대기 — ${m.reason}`;
+      return this.snapshot(t);
+    }
     if (!m.valid) {
       return this.markUnavailable(t, dt, m.reason || "측정 불가");
     }
@@ -134,9 +217,41 @@ export class CoachEngine {
     this.validMs += dt;
 
     if (this.state === "calibrating") {
-      this.calibFrames.push(m);
-      const elapsed = t - (this.calibStart ?? t);
-      if (elapsed >= this.settings.calibrationMs) {
+      const raw = m;
+      // Calibration also needs spike rejection; raw visibility was checked above.
+      m = this.calibrationSmoother.filter(m, t, 120);
+      if (this.calibrationAnchor && !this.isCalibrationStable(m, this.calibrationAnchor)) {
+        this.lastCalibrationT = null;
+        let change = this.calibrationChange;
+        if (!change || !this.isCalibrationStable(m, change.anchor)) {
+          change = { anchor: m, lastT: t, stableMs: 0, frames: [raw] };
+        } else {
+          change.stableMs += Math.max(0, t - change.lastT);
+          change.lastT = t;
+          change.frames.push(raw);
+        }
+        this.calibrationChange = change;
+        const newBase = change.stableMs >= 800 ? baselineFromFrames(change.frames) : null;
+        if (newBase) {
+          // A genuinely different pose must persist, rather than one noisy frame
+          // repeatedly erasing all of the user's accepted registration time.
+          this.resetCalibration();
+          this.calibrationAnchor = { ...raw, ...newBase };
+          this.calibFrames = change.frames;
+          this.calibrationStableMs = change.stableMs;
+          this.lastCalibrationT = t;
+          this.message = "자세 변화가 계속되어 새 자세로 기준을 모으고 있습니다. 평소 업무 화면을 보며 편하게 유지해 주세요.";
+        } else {
+          this.message = `움직임을 확인하는 중입니다. 등록 진행 ${(this.calibrationStableMs / 1000).toFixed(1)}초는 유지됩니다.`;
+        }
+        return this.snapshot(t);
+      }
+      this.calibrationChange = null;
+      this.calibrationAnchor ??= m;
+      if (this.lastCalibrationT != null) this.calibrationStableMs += Math.max(0, t - this.lastCalibrationT);
+      this.lastCalibrationT = t;
+      this.calibFrames.push(raw);
+      if (this.calibrationStableMs >= this.settings.calibrationMs) {
         const base = baselineFromFrames(this.calibFrames);
         if (!base) {
           this.message = "유효한 자세가 부족합니다. 얼굴과 어깨가 보이게 다시 등록하세요.";
@@ -145,21 +260,25 @@ export class CoachEngine {
           return this.snapshot(t);
         }
         this.baseline = base;
+        this.smoother.filter({ ...m, ...base }, t, this.settings.smoothingMs);
         this.state = "in_range";
         this.message =
           "기준 자세가 등록되었습니다. 의료적 정상 자세가 아니라 비교 기준입니다.";
         this.pushEvent(t);
       } else {
-        this.message = `기준 기록 중 (${((this.settings.calibrationMs - elapsed) / 1000).toFixed(1)}초)`;
+        this.message = `안정적으로 인식된 시간 ${(this.calibrationStableMs / 1000).toFixed(1)} / ${(this.settings.calibrationMs / 1000).toFixed(1)}초`;
       }
       return this.snapshot(t);
     }
 
     if (!this.baseline) {
       this.state = "ready";
+      this.message = "구도가 인식되었습니다. 현재 카메라 위치에서 기준을 등록하세요.";
       return this.snapshot(t);
     }
 
+    m = this.smoother.filter(m, t, this.settings.smoothingMs);
+    this.lastMetrics = m;
     const d = deltas(m, this.baseline);
     this.lastDeltas = d;
     const out = this.isOut(d, "enter");
@@ -229,6 +348,7 @@ export class CoachEngine {
   }
 
   snapshot(t: number): CoachSnapshot {
+    const pausedMs = this.totalPausedMs + (this.pausedAt == null ? 0 : Math.max(0, t - this.pausedAt));
     const mean =
       this.recoveryTimes.length === 0
         ? null
@@ -247,7 +367,11 @@ export class CoachEngine {
       validMs: this.validMs,
       unavailableMs: this.unavailableMs,
       inRangeMs: this.inRangeMs,
-      sessionMs: Math.max(0, t - this.sessionStart),
+      sessionMs: Math.max(0, t - this.sessionStart - pausedMs),
+      pausedMs,
+      pauseReason: this.pauseReason,
+      calibrationStableMs: this.calibrationStableMs,
+      calibrationTargetMs: this.settings.calibrationMs,
       inferMs: this.lastInferMs,
     };
   }
@@ -281,8 +405,10 @@ export class CoachEngine {
 
   private coachCopy(kind: ChangeKind | null) {
     if (kind === "shoulder") return "어깨 높이가 기준과 달라졌습니다. 앉은 자세를 확인해 주세요.";
-    if (kind === "torso") return "상체 위치가 기준과 달라졌습니다. 자세를 다시 확인해 주세요.";
-    return "고개가 기준보다 기울었습니다. 정면을 바라봐 주세요.";
+    if (kind === "torso") return this.settings.cameraPosition === "front"
+      ? "상체 위치가 기준과 달라졌습니다. 자세를 다시 확인해 주세요."
+      : "카메라 쪽 귀와 어깨의 상대 위치가 기준과 달라졌습니다. 업무 화면을 보며 자세를 확인해 주세요.";
+    return "고개 기울기가 등록한 기준과 달라졌습니다. 평소 업무 화면을 보며 자세를 확인해 주세요.";
   }
 
   private confirmRecovery(t: number) {
@@ -299,10 +425,17 @@ export class CoachEngine {
   }
 
   private markUnavailable(t: number, dt: number, reason: string) {
+    this.lastCalibrationT = null;
+    this.calibrationChange = null;
+    this.calibrationSmoother.reset();
+    this.smoother.reset();
     this.unavailableMs += dt;
-    this.lastMetrics = this.lastMetrics
-      ? { ...this.lastMetrics, valid: false, reason }
-      : computeMetrics([], this.settings.minVisibility);
+    this.lastMetrics = {
+      ...(this.lastMetrics ?? computeMetrics([], this.settings.minVisibility, this.settings.cameraPosition)),
+      valid: false,
+      reason,
+    };
+    this.lastDeltas = null;
     if (this.state !== "unavailable" && this.state !== "calibrating") {
       this.pendingCoachT = null;
       this.sustainStart = null;
@@ -311,11 +444,27 @@ export class CoachEngine {
       this.message = `측정 불가 — ${reason}`;
       this.pushEvent(t);
     } else if (this.state === "calibrating") {
-      this.message = `등록 보류 — ${reason}`;
+      this.message = `등록 보류 (${(this.calibrationStableMs / 1000).toFixed(1)}초 누적) — ${reason}`;
     } else {
       this.message = `측정 불가 — ${reason}`;
     }
     return this.snapshot(t);
+  }
+
+  private resetCalibration() {
+    this.calibFrames = [];
+    this.calibrationStableMs = 0;
+    this.calibrationAnchor = null;
+    this.lastCalibrationT = null;
+    this.calibrationChange = null;
+    this.calibrationSmoother.reset();
+  }
+
+  private isCalibrationStable(metrics: Metrics, anchor: Metrics): boolean {
+    const d = deltas(metrics, anchor);
+    return Math.abs(d.head) <= Math.max(4, Math.min(8, this.settings.headEnterDeg * 0.75))
+      && Math.abs(d.shoulder) <= Math.max(4, Math.min(8, this.settings.shoulderEnterDeg * 0.75))
+      && d.torso <= Math.max(0.06, Math.min(0.15, this.settings.torsoEnter * 0.75));
   }
 
   private pushEvent(t: number) {
