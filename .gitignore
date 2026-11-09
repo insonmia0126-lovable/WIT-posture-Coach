@@ -9,3 +9,4 @@ requirements.lock.txt
 *.zip
 app/node_modules/
 app/dist/
+.local-tools/

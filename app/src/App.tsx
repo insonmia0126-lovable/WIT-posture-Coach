@@ -1,15 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cameraErrorMessage, listCameras } from "./camera";
 import { simulatedPose } from "./demo/simulator";
 import { CoachEngine } from "./engine/coach";
 import {
-  DEFAULT_SETTINGS,
   DEMO_SHORT_SETTINGS,
+  type CameraPosition,
   type AppState,
   type CoachSettings,
   type CoachSnapshot,
 } from "./engine/types";
 import { drawOverlay } from "./overlay";
+import { CAMERA_POSITIONS, cameraPositionGuide, cameraPositionLabel, isCameraPosition } from "./engine/cameraPosition";
 import { createPoseLandmarker, detectPose } from "./pose/landmarker";
 import { personalCoachLines } from "./coachGuide";
 import {
@@ -32,6 +33,7 @@ import {
   type StoredSession,
 } from "./storage";
 import { APP_VERSION } from "./version";
+import { loadSettings, POSTURE_PRESETS, saveSettings, selectedPosturePreset } from "./settings";
 
 type View = "start" | "live" | "results" | "settings" | "learning" | "history";
 const STATE_KO: Record<AppState, string> = {
@@ -46,8 +48,8 @@ const STATE_KO: Record<AppState, string> = {
 
 export default function App() {
   const [view, setView] = useState<View>("start");
-  const [settings, setSettings] = useState<CoachSettings>(DEFAULT_SETTINGS);
-  const [engine] = useState(() => new CoachEngine(DEFAULT_SETTINGS));
+  const [settings, setSettings] = useState<CoachSettings>(loadSettings);
+  const [engine] = useState(() => new CoachEngine(settings));
   const [snap, setSnap] = useState<CoachSnapshot>(() => engine.snapshot(0));
   const [error, setError] = useState("");
   const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
@@ -58,6 +60,7 @@ export default function App() {
   const [inferFps, setInferFps] = useState(0);
   const [modelReady, setModelReady] = useState(false);
   const [camStatus, setCamStatus] = useState("");
+  const [tabNotice, setTabNotice] = useState("");
   const modelPromise = useRef<Promise<unknown> | null>(null);
   const [person, setPerson] = useState<Person>(() => currentPerson());
   const [people, setPeople] = useState<Person[]>(() => listPeople());
@@ -78,26 +81,65 @@ export default function App() {
   const demoT0 = useRef(0);
   const landmarksRef = useRef(true);
   const demoRef = useRef(false);
+  const cameraSessionRef = useRef(0);
+  const sessionActiveRef = useRef(false);
+
+  const bindVideo = useCallback((video: HTMLVideoElement | null) => {
+    videoRef.current = video;
+    if (video && streamRef.current) {
+      if (video.srcObject !== streamRef.current) video.srcObject = streamRef.current;
+      video.muted = true;
+      video.playsInline = true;
+      void video.play().catch(() => {});
+    }
+  }, []);
 
   useEffect(() => {
-    engine.settings = { ...settings };
+    engine.settings = { ...settings, ...(demoRef.current ? DEMO_SHORT_SETTINGS : {}) };
+    saveSettings(settings);
   }, [engine, settings]);
 
   useEffect(() => {
-    void ensureModel();
+    void ensureModel().catch(() => {});
   }, []);
 
   useEffect(() => {
     const onVis = () => {
-      const el = videoRef.current;
-      if (document.hidden && el && streamRef.current) void el.play().catch(() => {});
+      if (!sessionActiveRef.current) return;
+      if (document.hidden && engine.settings.pauseWhenHidden && engine.state !== "paused") {
+        setSnap(engine.pause(now(), "hidden"));
+        setTabNotice("다른 탭·최소화 상태에서는 측정을 쉬며, 이 시간은 기록에서 제외됩니다.");
+      } else if (document.hidden && !engine.settings.pauseWhenHidden) {
+        const el = videoRef.current;
+        if (el && streamRef.current) void el.play().catch(() => {});
+      } else if (!document.hidden && engine.state === "paused" && engine.pauseReason === "hidden") {
+        if (settings.autoResumeOnReturn) {
+          setSnap(engine.resume(now()));
+          setTabNotice("화면으로 돌아와 측정을 자동 재개했습니다. 쉬었던 시간은 기록에서 제외했습니다.");
+        } else {
+          setSnap({ ...engine.snapshot(now()), message: "화면으로 돌아왔습니다. 측정 재개를 눌러 이어서 측정하세요." });
+          setTabNotice("화면으로 돌아왔습니다. 측정 재개를 눌러 이어서 측정하세요. 쉬었던 시간은 기록에서 제외됩니다.");
+        }
+      }
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, []);
+  }, [engine, settings.autoResumeOnReturn, settings.pauseWhenHidden]);
 
   function now() {
     return performance.now() - t0.current;
+  }
+
+  function changeSettings(next: CoachSettings) {
+    if (next.cameraPosition !== engine.settings.cameraPosition) {
+      setSnap(engine.setCameraPosition(next.cameraPosition, now()));
+    }
+    engine.settings = { ...next, ...(demoRef.current ? DEMO_SHORT_SETTINGS : {}) };
+    if (!next.pauseWhenHidden && engine.pauseReason === "hidden") {
+      setSnap(engine.resume(now()));
+      setTabNotice("");
+    }
+    setSettings(next);
   }
 
   async function ensureModel() {
@@ -124,20 +166,10 @@ export default function App() {
 
   function attachStream(stream: MediaStream) {
     streamRef.current = stream;
-    const bind = () => {
-      const el = videoRef.current;
-      if (!el) return;
-      if (el.srcObject !== stream) el.srcObject = stream;
-      el.muted = true;
-      el.playsInline = true;
-      if (el.paused) void el.play().catch(() => {});
-    };
-    bind();
-    requestAnimationFrame(bind);
-    window.setTimeout(bind, 250);
+    bindVideo(videoRef.current);
   }
 
-  async function openCamera(): Promise<MediaStream> {
+  async function openCamera(sessionId: number): Promise<void> {
     const constraints: MediaStreamConstraints = {
       audio: false,
       video: deviceId
@@ -145,12 +177,20 @@ export default function App() {
         : { facingMode: "user", width: { ideal: 960 }, height: { ideal: 540 } },
     };
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    if (sessionId !== cameraSessionRef.current) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
     attachStream(stream);
-    void listCameras().then(setCameras);
-    return stream;
+    void listCameras().then(setCameras).catch(() => {});
   }
 
   async function startWebcam() {
+    const sessionId = ++cameraSessionRef.current;
+    stopLoop();
+    stopCameraTracks();
+    sessionActiveRef.current = true;
+    setTabNotice("");
     setError("");
     setDemo(false);
     demoRef.current = false;
@@ -159,13 +199,19 @@ export default function App() {
     setView("live");
     t0.current = performance.now();
     setSnap(engine.startSession(0, false));
-    const modelTask = ensureModel();
     try {
-      await openCamera();
+      // Wait for both so a late camera response cannot leak tracks after a model failure.
+      const startup = await Promise.allSettled([openCamera(sessionId), ensureModel()]);
+      if (sessionId !== cameraSessionRef.current) return;
+      for (const task of startup) {
+        if (task.status === "rejected") throw task.reason;
+      }
       setCamStatus("");
       startLoop(false);
-      await modelTask;
     } catch (e) {
+      if (sessionId !== cameraSessionRef.current) return;
+      sessionActiveRef.current = false;
+      stopCameraTracks();
       setCamStatus("");
       setView("start");
       setError(cameraErrorMessage(e));
@@ -173,6 +219,11 @@ export default function App() {
   }
 
   async function startDemo() {
+    const sessionId = ++cameraSessionRef.current;
+    stopLoop();
+    stopCameraTracks();
+    sessionActiveRef.current = true;
+    setTabNotice("");
     setError("");
     setDemo(true);
     demoRef.current = true;
@@ -184,9 +235,11 @@ export default function App() {
     setView("live");
     const modelTask = ensureModel().catch(() => null);
     try {
-      await openCamera();
+      await openCamera(sessionId);
+      if (sessionId !== cameraSessionRef.current) return;
       setCamStatus("");
     } catch {
+      if (sessionId !== cameraSessionRef.current) return;
       setCamStatus("웹캠을 열 수 없어 시연 데이터로 진행합니다. 권한을 허용하면 다시 시작해 주세요.");
     }
     engine.beginCalibration(0);
@@ -202,65 +255,74 @@ export default function App() {
 
   function startLoop(isDemo: boolean) {
     stopLoop();
+    // Session-relative time must never be compared with the previous session.
+    lastInfer.current = -Infinity;
+    inferLock.current = false;
+    fpsWindow.current = [];
+    setInferFps(0);
+    if (document.hidden && engine.settings.pauseWhenHidden && engine.state !== "paused") {
+      setSnap(engine.pause(now(), "hidden"));
+    }
     let lastPoints: ReturnType<typeof simulatedPose>["points"] | null = null;
     let lastFrameCount = -1;
+    const overlay = () => {
+      const c = canvasRef.current;
+      if (c) drawOverlay(c, videoRef.current, lastPoints, landmarksRef.current, engine.settings.cameraPosition, engine.settings.minVisibility);
+    };
     const tick = () => {
       const v = videoRef.current;
-      const c = canvasRef.current;
       const t = now();
       try {
-        if (engine.state !== "paused") {
-          if (!inferLock.current && t - lastInfer.current >= engine.settings.inferEveryMs) {
-            inferLock.current = true;
-            lastInfer.current = t;
-            try {
-              const liveReady = Boolean(v && landmarkerRef.current && v.readyState >= 2 && v.videoWidth > 0);
-              const decoded = v ? (v as HTMLVideoElement & { webkitDecodedFrameCount?: number }).webkitDecodedFrameCount : undefined;
-              const frameMoved = decoded == null || decoded !== lastFrameCount;
-              if (decoded != null) lastFrameCount = decoded;
-              if (liveReady && v && landmarkerRef.current && frameMoved) {
-                try {
-                  const frame = detectPose(landmarkerRef.current, v, performance.now());
-                  lastPoints = frame.points;
-                  setSnap(engine.feed({ t, points: frame.points, poseCount: frame.poseCount }, frame.inferMs));
-                } catch {
-                  lastPoints = null;
-                  const broken = landmarkerRef.current;
-                  landmarkerRef.current = null;
-                  modelPromise.current = null;
-                  setModelReady(false);
-                  try {
-                    broken?.close();
-                  } catch {
-                    /* 이미 닫힌 인식기는 무시 */
-                  }
-                  void ensureModel();
-                }
-              } else if (isDemo && !liveReady) {
-                const sim = simulatedPose(performance.now() - demoT0.current);
-                lastPoints = sim.points;
-                setSnap(engine.feed({ t, points: sim.points, poseCount: 1 }, 4));
+        if (document.hidden && engine.settings.pauseWhenHidden && engine.state !== "paused") {
+          setSnap(engine.pause(t, "hidden"));
+        }
+        if (engine.state !== "paused" && !inferLock.current && t - lastInfer.current >= engine.settings.inferEveryMs) {
+          inferLock.current = true;
+          lastInfer.current = t;
+          try {
+            const liveReady = Boolean(v && landmarkerRef.current && v.readyState >= 2 && v.videoWidth > 0);
+            const decoded = v ? (v as HTMLVideoElement & { webkitDecodedFrameCount?: number }).webkitDecodedFrameCount : undefined;
+            const frameMoved = decoded == null || decoded !== lastFrameCount;
+            if (decoded != null) lastFrameCount = decoded;
+            if (liveReady && v && landmarkerRef.current && frameMoved) {
+              try {
+                const frame = detectPose(landmarkerRef.current, v, performance.now());
+                lastPoints = frame.points;
+                setCamStatus("");
+                setSnap(engine.feed({ t, points: frame.points, poseCount: frame.poseCount }, frame.inferMs));
+              } catch {
+                lastPoints = null;
+                const broken = landmarkerRef.current;
+                landmarkerRef.current = null;
+                modelPromise.current = null;
+                setModelReady(false);
+                setCamStatus("자세 인식기를 다시 연결하는 중입니다.");
+                try { broken?.close(); } catch { /* Already closed. */ }
+                void ensureModel().catch(() => {});
               }
-              fpsWindow.current.push(performance.now());
-              fpsWindow.current = fpsWindow.current.filter((x) => performance.now() - x < 1000);
-              setInferFps(fpsWindow.current.length);
-            } finally {
-              inferLock.current = false;
+            } else if (isDemo && !liveReady) {
+              const sim = simulatedPose(performance.now() - demoT0.current);
+              lastPoints = sim.points;
+              setSnap(engine.feed({ t, points: sim.points, poseCount: 1 }, 4));
             }
+            fpsWindow.current.push(performance.now());
+            fpsWindow.current = fpsWindow.current.filter((x) => performance.now() - x < 1000);
+            setInferFps(fpsWindow.current.length);
+          } finally {
+            inferLock.current = false;
           }
         }
         if (streamRef.current && v && v.srcObject !== streamRef.current) attachStream(streamRef.current);
-        if (c) drawOverlay(c, v, lastPoints, landmarksRef.current);
+        overlay();
       } catch {
-        /* 한 프레임 실패로 루프를 끊지 않는다 */
+        // One failed frame must not stop the session timer.
       }
     };
     const draw = () => {
-      const v = videoRef.current;
-      const c = canvasRef.current;
-      if (c) drawOverlay(c, v, lastPoints, landmarksRef.current);
       loopRef.current = requestAnimationFrame(draw);
+      overlay();
     };
+    // Preserve the upstream timer loop; animation frames stop in hidden tabs.
     loopTimer.current = window.setInterval(tick, Math.max(200, engine.settings.inferEveryMs));
     loopRef.current = requestAnimationFrame(draw);
   }
@@ -276,6 +338,10 @@ export default function App() {
   }
 
   function endSession() {
+    sessionActiveRef.current = false;
+    setTabNotice("");
+    cameraSessionRef.current += 1;
+    demoRef.current = false;
     stopLoop();
     stopCameraTracks();
     const s = engine.snapshot(now());
@@ -291,6 +357,7 @@ export default function App() {
       startedAt: new Date().toISOString(),
       demo,
       sessionMs: s.sessionMs,
+      pausedMs: s.pausedMs,
       validMs: s.validMs,
       unavailableMs: s.unavailableMs,
       inRangeMs: s.inRangeMs,
@@ -360,6 +427,9 @@ export default function App() {
             if (next) refreshPeople(next);
           }}
           onLearning={() => setView("learning")}
+          onSettings={() => setView("settings")}
+          cameraPosition={settings.cameraPosition}
+          onCameraPosition={(cameraPosition) => changeSettings({ ...settings, cameraPosition })}
           onRefreshCams={async () => setCameras(await listCameras())}
         />
       )}
@@ -394,17 +464,28 @@ export default function App() {
             <div className="banner-sim">시연 모드 · 웹캠 실시간 미리보기 · 단축 타이머 · 실측 기록과 섞지 않음</div>
           )}
           <p className="muted">
-            노트북을 안정된 위치에 놓고 화면 각도를 고정해 주세요. 얼굴과 양쪽 어깨가 보이도록 앉은 뒤 기준
-            자세를 등록하세요. 기준 등록은 7초입니다. 업무 중 작은 고개·어깨 움직임은 허용 범위 안에 둡니다.
-            창을 최소화하거나 다른 작업을 해도 종료를 누르기 전까지 측정은 유지됩니다. 노트북 위치나 화면
-            각도를 바꾸면 재등록하세요.
+            카메라와 화면 위치를 고정해 주세요. 안정적으로 인식된 시간 {(engine.settings.calibrationMs / 1000).toFixed(1)}초를 모아 기준을 등록합니다.
+            카메라 위치를 바꾸면 새 위치에서 기준을 다시 등록하세요.
           </p>
+          <div className="notice" role="status" style={{ marginBottom: 12 }}>
+            {snap.pauseReason === "manual" ? "사용자가 일시정지했습니다. 탭으로 돌아와도 자동 재개하지 않습니다. 측정 재개를 눌러 주세요." : tabNotice || (!settings.pauseWhenHidden
+              ? "탭 전환·최소화 중에도 측정을 시도합니다. 브라우저의 절전·카메라 제한으로 인식이 중단될 수 있습니다. 설정에서 탭을 벗어나면 일시정지하도록 선택할 수 있습니다."
+              : settings.autoResumeOnReturn
+              ? "탭을 바꾸거나 최소화하면 측정을 쉬고, 돌아오면 자동 재개합니다. 계속 측정하려면 이 화면을 다른 작업 창 옆에 띄워 두세요."
+              : "탭을 바꾸거나 최소화하면 측정을 쉽니다. 돌아온 뒤 측정 재개를 눌러 주세요.")}
+          </div>
+          <CameraPositionPicker
+            position={settings.cameraPosition}
+            onChange={(cameraPosition) => changeSettings({ ...settings, cameraPosition })}
+          />
           <div className="live-grid">
             <div>
               <div className="monitor">
-                <video ref={videoRef} playsInline muted autoPlay />
+                <video ref={bindVideo} playsInline muted autoPlay />
                 <canvas ref={canvasRef} />
-                <div className="guide-caption">얼굴과 양쪽 어깨가 안내선 안에 오게 앉으세요</div>
+                <div className="guide-caption">
+                  {cameraPositionLabel(settings.cameraPosition)} · {settings.cameraPosition === "front" ? "양쪽 눈·어깨" : "카메라 쪽 눈·귀와 양쪽 어깨"}가 보이게 앉으세요
+                </div>
                 {camStatus && <div className="cam-status">{camStatus}</div>}
                 {!demo && !modelReady && !camStatus && (
                   <div className="cam-status">미리보기 표시 중 · 자세 모델 준비</div>
@@ -415,16 +496,22 @@ export default function App() {
                   type="button"
                   className="primary"
                   onClick={() => setSnap(engine.beginCalibration(now()))}
-                  disabled={snap.state === "paused"}
+                  disabled={snap.state === "paused" || !snap.metrics?.valid}
                 >
                   {snap.baseline ? "재등록" : "기준 등록"}
                 </button>
                 {snap.state === "paused" ? (
-                  <button type="button" onClick={() => setSnap(engine.resume(now()))}>
-                    재시작
+                  <button type="button" onClick={() => {
+                    setTabNotice("");
+                    setSnap(engine.resume(now()));
+                  }}>
+                    측정 재개
                   </button>
                 ) : (
-                  <button type="button" onClick={() => setSnap(engine.pause(now()))}>
+                  <button type="button" onClick={() => {
+                    setTabNotice("");
+                    setSnap(engine.pause(now(), "manual"));
+                  }}>
                     일시정지
                   </button>
                 )}
@@ -443,6 +530,15 @@ export default function App() {
                   랜드마크
                 </label>
               </div>
+              {(snap.state === "calibrating" || (snap.state === "paused" && !snap.baseline && snap.calibrationStableMs > 0)) && (
+                <div className="notice" style={{ marginTop: 12 }}>
+                  <label>
+                    기준 등록 진행 · 안정 인식 {(snap.calibrationStableMs / 1000).toFixed(1)} / {(snap.calibrationTargetMs / 1000).toFixed(1)}초
+                    <progress aria-label="기준 등록 진행" max={snap.calibrationTargetMs} value={snap.calibrationStableMs} style={{ display: "block", width: "100%", marginTop: 6 }} />
+                  </label>
+                  <small>짧은 흔들림에는 진행률을 유지합니다. 가려진 시간은 제외하고, 다른 자세가 계속될 때만 새 자세로 기준을 모읍니다.</small>
+                </div>
+              )}
             </div>
             <div className="card">
               <div className={`status ${snap.state}`}>
@@ -456,9 +552,13 @@ export default function App() {
                 기준은 의료적으로 검증된 정상 자세가 아니라, 지금 등록한 비교 기준입니다. 전방 머리 자세를
                 거북목 각도로 표시하지 않습니다.
               </p>
+              <p className="muted" aria-live="polite">
+                구도 인식: {snap.metrics?.valid ? "인식됨" : snap.metrics?.reason || "얼굴과 어깨를 확인하는 중입니다."}
+                {snap.baseline ? ` · ${cameraPositionLabel(snap.baseline.cameraPosition)} 기준 등록됨` : " · 현재 위치의 기준 등록 필요"}
+              </p>
               <div className="metrics-list" style={{ marginTop: 8 }}>
                 <div>
-                  고개 기울기 Δ
+                  {settings.cameraPosition === "front" ? "고개 기울기 Δ" : "옆얼굴 기울기 Δ"}
                   <strong>
                     {" "}
                     {snap.deltas ? `${snap.deltas.head >= 0 ? "+" : ""}${snap.deltas.head.toFixed(1)}°` : "—"}
@@ -472,7 +572,7 @@ export default function App() {
                   </strong>
                 </div>
                 <div>
-                  상체 보조 지표
+                  {settings.cameraPosition === "front" ? "상체 보조 지표" : "귀·어깨 위치 변화"}
                   <strong> {snap.deltas ? snap.deltas.torso.toFixed(3) : "—"}</strong>
                 </div>
                 <div>
@@ -482,6 +582,7 @@ export default function App() {
               </div>
               <div className="footer-stats">
                 <span>측정 {(snap.sessionMs / 1000).toFixed(0)}초</span>
+                <span>일시정지 {(snap.pausedMs / 1000).toFixed(0)}초 제외</span>
                 <span>안내 {snap.coachingCount}회</span>
                 <span>복귀 {snap.recoveryCount}회</span>
               </div>
@@ -507,10 +608,11 @@ export default function App() {
       {view === "settings" && (
         <SettingsPanel
           settings={settings}
-          onChange={setSettings}
+          onChange={changeSettings}
           cameras={cameras}
           deviceId={deviceId}
           onDevice={setDeviceId}
+          onBack={() => setView(streamRef.current || demoRef.current ? "live" : "start")}
         />
       )}
 
@@ -593,6 +695,9 @@ function StartScreen({
   onWebcam,
   onDemo,
   onLearning,
+  onSettings,
+  cameraPosition,
+  onCameraPosition,
   onHistory,
   onRename,
   onCreate,
@@ -610,6 +715,9 @@ function StartScreen({
   onWebcam: () => void;
   onDemo: () => void;
   onLearning: () => void;
+  onSettings: () => void;
+  cameraPosition: CameraPosition;
+  onCameraPosition: (position: CameraPosition) => void;
   onHistory: () => void;
   onRename: (name: string) => void;
   onCreate: () => void;
@@ -636,12 +744,16 @@ function StartScreen({
         onHistory={onHistory}
       />
       {error && <p className="error">{error}</p>}
-      <div className="row actions">
+      <CameraPositionPicker position={cameraPosition} onChange={onCameraPosition} />
+      <div className="row" style={{ margin: "1rem 0" }}>
         <button type="button" className="primary" onClick={onWebcam}>
           웹캠 시작
         </button>
         <button type="button" onClick={onDemo}>
           데모 시작
+        </button>
+        <button type="button" onClick={onSettings}>
+          자세 허용 범위 설정
         </button>
         <button type="button" onClick={onLearning}>
           학습 기록 ({learningCount})
@@ -679,18 +791,40 @@ function StartScreen({
   );
 }
 
+function CameraPositionPicker({ position, onChange }: {
+  position: CameraPosition;
+  onChange: (position: CameraPosition) => void;
+}) {
+  return (
+    <div style={{ margin: "1rem 0" }}>
+      <label className="field">
+        카메라 위치 (사용자 기준)
+        <select aria-label="카메라 위치" value={position} onChange={(event) => {
+          if (isCameraPosition(event.target.value)) onChange(event.target.value);
+        }}>
+          {CAMERA_POSITIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+        </select>
+      </label>
+      <p className="muted">{cameraPositionGuide(position)}</p>
+      {position !== "front" && <p className="muted">대각 촬영용 비교 지표입니다. 완전한 옆모습이나 목의 실제 각도를 측정하지 않습니다.</p>}
+    </div>
+  );
+}
+
 function SettingsPanel({
   settings,
   onChange,
   cameras,
   deviceId,
   onDevice,
+  onBack,
 }: {
   settings: CoachSettings;
   onChange: (s: CoachSettings) => void;
   cameras: MediaDeviceInfo[];
   deviceId: string;
   onDevice: (id: string) => void;
+  onBack: () => void;
 }) {
   const set = (k: keyof CoachSettings, v: number | boolean) => {
     if (typeof v === "number" && !Number.isFinite(v)) return;
@@ -698,7 +832,50 @@ function SettingsPanel({
   };
   return (
     <div className="card">
+      <button type="button" onClick={onBack} style={{ marginBottom: 12 }}>돌아가기</button>
       <h2>시제품 설정</h2>
+      <label className="field">
+        탭을 벗어나면 일시정지
+        <input type="checkbox" checked={settings.pauseWhenHidden} onChange={(event) => set("pauseWhenHidden", event.target.checked)} />
+      </label>
+      <p className="muted">기본은 탭 전환·최소화 중에도 측정 유지입니다. 브라우저 제한으로 새 영상이 없으면 그 시간은 유효한 자세 측정으로 계산하지 않습니다.</p>
+      <label className="field">
+        탭 복귀 시 자동 재개
+        <input type="checkbox" disabled={!settings.pauseWhenHidden} checked={settings.autoResumeOnReturn} onChange={(event) => set("autoResumeOnReturn", event.target.checked)} />
+      </label>
+      <p className="muted">탭을 벗어나면 일시정지를 선택했을 때 적용합니다. 카메라 연결은 유지하며, 직접 누른 일시정지는 자동으로 풀리지 않습니다.</p>
+      <label className="field">
+        판정값 흔들림 완화
+        <select value={settings.smoothingMs} onChange={(event) => set("smoothingMs", Number(event.target.value))}>
+          <option value={0}>끄기</option>
+          <option value={120}>기본</option>
+          <option value={250}>강하게</option>
+        </select>
+      </label>
+      <p className="muted">짧은 인식값 떨림을 줄입니다. 강하게 설정하면 자세 변화가 화면에 반영되는 데 조금 더 시간이 걸립니다.</p>
+      <CameraPositionPicker
+        position={settings.cameraPosition}
+        onChange={(cameraPosition) => onChange({ ...settings, cameraPosition })}
+      />
+      <h3>자세 허용 범위</h3>
+      <p className="muted">작은 업무 움직임을 허용하도록 기본 범위를 넓혔습니다. 허용 범위만 바뀌며 등록한 기준 자세는 유지됩니다.</p>
+      <div className="row" style={{ marginBottom: 10 }}>
+        {POSTURE_PRESETS.map((preset) => (
+          <button
+            key={preset.id}
+            type="button"
+            aria-pressed={selectedPosturePreset(settings) === preset.id}
+            className={selectedPosturePreset(settings) === preset.id ? "primary" : ""}
+            onClick={() => onChange({ ...settings, ...preset.values })}
+          >
+            {preset.label}
+          </button>
+        ))}
+      </div>
+      <p className="muted">
+        현재 이탈 기준: 고개 {settings.headEnterDeg}° · 어깨 {settings.shoulderEnterDeg}° · 상체 {settings.torsoEnter.toFixed(2)}.
+        숫자가 클수록 더 큰 움직임을 허용합니다. 선택한 범위는 이 브라우저에 저장됩니다.
+      </p>
       <p className="muted">값은 검증용 가정이며 의료 기준이 아닙니다. 발표용 단축과 실사용 기본을 구분하세요.</p>
       <label className="field">
         기준 등록(ms){" "}
@@ -728,6 +905,9 @@ function SettingsPanel({
       </label>
       <label className="field">
         상체 이탈 <input type="number" step="0.01" value={settings.torsoEnter} onChange={(e) => set("torsoEnter", +e.target.value)} />
+      </label>
+      <label className="field">
+        상체 복귀 <input type="number" step="0.01" value={settings.torsoExit} onChange={(e) => set("torsoExit", +e.target.value)} />
       </label>
       <label className="field">
         추론 간격(ms) <input type="number" value={settings.inferEveryMs} onChange={(e) => set("inferEveryMs", +e.target.value)} />
@@ -943,8 +1123,18 @@ function Results({
               </tr>
               <tr>
                 <td>전체 세션</td>
-                <td>{(s.sessionMs / 1000).toFixed(1)}초</td>
+                <td>{((s.sessionMs + (s.pausedMs ?? 0)) / 1000).toFixed(1)}초</td>
                 <td>시작부터 종료까지</td>
+              </tr>
+              <tr>
+                <td>측정 진행</td>
+                <td>{(s.sessionMs / 1000).toFixed(1)}초</td>
+                <td>일시정지 시간을 제외한 시간</td>
+              </tr>
+              <tr>
+                <td>일시정지</td>
+                <td>{((s.pausedMs ?? 0) / 1000).toFixed(1)}초</td>
+                <td>탭 전환·수동 정지 시간은 측정에서 제외</td>
               </tr>
               <tr>
                 <td>유효 측정</td>
@@ -994,10 +1184,11 @@ function Results({
             </tbody>
           </table>
           <p className="muted">유지 비율 분모는 유효 측정 시간입니다. 측정 불가는 정상 자세로 집계하지 않습니다.</p>
-          <div className="timeline" title="상태 변화">
+          <div className="timeline" title="상태 변화 (일시정지 포함)">
             {s.timeline.map((ev, i) => {
-              const next = s.timeline[i + 1]?.t ?? s.sessionMs;
-              const w = Math.max(2, ((next - ev.t) / Math.max(1, s.sessionMs)) * 100);
+              const totalMs = s.sessionMs + (s.pausedMs ?? 0);
+              const next = s.timeline[i + 1]?.t ?? totalMs;
+              const w = Math.max(2, ((next - ev.t) / Math.max(1, totalMs)) * 100);
               const color: Record<string, string> = {
                 in_range: "#2f6f4e",
                 coaching: "#c45c26",

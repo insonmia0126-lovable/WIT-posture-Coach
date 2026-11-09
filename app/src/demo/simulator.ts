@@ -14,14 +14,16 @@ export function simulatedPose(elapsedMs: number): { points: Point[]; poseCount: 
   }
   const rad = (head * Math.PI) / 180;
   pts[LM.NOSE] = { x: 0.5, y: 0.33, visibility: 1 };
-  pts[LM.LEFT_EYE] = { x: 0.44, y: 0.31, visibility: 1 };
-  pts[LM.RIGHT_EYE] = {
-    x: 0.44 + Math.cos(rad) * 0.12,
-    y: 0.31 + Math.sin(rad) * 0.12,
-    visibility: 1,
-  };
-  pts[LM.LEFT_EAR] = { x: 0.4, y: 0.32, visibility: 1 };
-  pts[LM.RIGHT_EAR] = { x: 0.6, y: 0.32, visibility: 1 };
+  for (const [index, dx, dy] of [
+    [LM.LEFT_EYE, -0.06, 0], [LM.RIGHT_EYE, 0.06, 0],
+    [LM.LEFT_EAR, -0.1, 0.01], [LM.RIGHT_EAR, 0.1, 0.01],
+  ]) {
+    pts[index] = {
+      x: 0.5 + Math.cos(rad) * dx - Math.sin(rad) * dy,
+      y: 0.31 + Math.sin(rad) * dx + Math.cos(rad) * dy,
+      visibility: 1,
+    };
+  }
   pts[LM.LEFT_SHOULDER] = { x: 0.34, y: 0.52, visibility: 1 };
   pts[LM.RIGHT_SHOULDER] = { x: 0.66, y: 0.52, visibility: 1 };
   return { points: pts, poseCount: 1 };

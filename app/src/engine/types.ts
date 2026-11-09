@@ -8,6 +8,8 @@ export type AppState =
   | "paused";
 
 export type ChangeKind = "head" | "shoulder" | "torso";
+export type CameraPosition = "front" | "left" | "right";
+export type PauseReason = "manual" | "hidden";
 
 export type Point = { x: number; y: number; visibility: number };
 
@@ -18,6 +20,8 @@ export type PoseSample = {
 };
 
 export type Metrics = {
+  cameraPosition: CameraPosition;
+  torsoScale: number;
   headTiltDeg: number;
   shoulderTiltDeg: number;
   torsoDx: number;
@@ -27,6 +31,8 @@ export type Metrics = {
 };
 
 export type Baseline = {
+  cameraPosition: CameraPosition;
+  torsoScale: number;
   headTiltDeg: number;
   shoulderTiltDeg: number;
   torsoDx: number;
@@ -34,7 +40,11 @@ export type Baseline = {
 };
 
 export type CoachSettings = {
+  cameraPosition: CameraPosition;
   calibrationMs: number;
+  pauseWhenHidden: boolean;
+  autoResumeOnReturn: boolean;
+  smoothingMs: number;
   sustainMs: number;
   repeatAlertMs: number;
   recoveryMs: number;
@@ -50,7 +60,11 @@ export type CoachSettings = {
 };
 
 export const DEFAULT_SETTINGS: CoachSettings = {
+  cameraPosition: "front",
   calibrationMs: 7000,
+  pauseWhenHidden: false,
+  autoResumeOnReturn: true,
+  smoothingMs: 120,
   sustainMs: 20000,
   repeatAlertMs: 180000,
   recoveryMs: 3000,
@@ -95,5 +109,9 @@ export type CoachSnapshot = {
   unavailableMs: number;
   inRangeMs: number;
   sessionMs: number;
+  pausedMs: number;
+  pauseReason: PauseReason | null;
+  calibrationStableMs: number;
+  calibrationTargetMs: number;
   inferMs: number;
 };

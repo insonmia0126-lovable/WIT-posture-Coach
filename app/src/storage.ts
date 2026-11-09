@@ -9,6 +9,7 @@ export type StoredSession = {
   startedAt: string;
   demo: boolean;
   sessionMs: number;
+  pausedMs?: number;
   validMs: number;
   unavailableMs: number;
   inRangeMs: number;
@@ -62,6 +63,7 @@ export function toCsv(rows: StoredSession[]): string {
     "startedAt",
     "mode",
     "session_s",
+    "paused_s",
     "valid_s",
     "unavailable_s",
     "in_range_ratio",
@@ -83,6 +85,7 @@ export function toCsv(rows: StoredSession[]): string {
       r.startedAt,
       r.demo ? "DEMO" : "WEBCAM",
       (r.sessionMs / 1000).toFixed(1),
+      ((r.pausedMs ?? 0) / 1000).toFixed(1),
       (r.validMs / 1000).toFixed(1),
       (r.unavailableMs / 1000).toFixed(1),
       ratio,

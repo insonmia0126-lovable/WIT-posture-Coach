@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CoachEngine } from "./coach";
 import { DEFAULT_SETTINGS, type CoachSettings, type Point } from "./types";
+import { POSTURE_PRESETS } from "../settings";
 
 const S: CoachSettings = {
   ...DEFAULT_SETTINGS,
@@ -11,7 +12,7 @@ const S: CoachSettings = {
 };
 import { LM } from "./metrics";
 
-function pose(t: number, opts?: { headDeg?: number; vis?: number; extra?: boolean }): {
+function pose(t: number, opts?: { headDeg?: number; shoulderDeg?: number; torsoOffset?: number; vis?: number; extra?: boolean }): {
   t: number;
   points: Point[];
   poseCount: number;
@@ -28,6 +29,14 @@ function pose(t: number, opts?: { headDeg?: number; vis?: number; extra?: boolea
   };
   pts[LM.LEFT_SHOULDER] = { x: 0.35, y: 0.5, visibility: vis };
   pts[LM.RIGHT_SHOULDER] = { x: 0.65, y: 0.5, visibility: vis };
+  if (opts?.shoulderDeg) {
+    const shoulder = (opts.shoulderDeg * Math.PI) / 180;
+    pts[LM.LEFT_SHOULDER] = { x: 0.5 - Math.cos(shoulder) * 0.15, y: 0.5 - Math.sin(shoulder) * 0.15, visibility: vis };
+    pts[LM.RIGHT_SHOULDER] = { x: 0.5 + Math.cos(shoulder) * 0.15, y: 0.5 + Math.sin(shoulder) * 0.15, visibility: vis };
+  }
+  for (const index of [LM.NOSE, LM.LEFT_EYE, LM.RIGHT_EYE]) {
+    pts[index].y += (opts?.torsoOffset ?? 0) * 0.3;
+  }
   return { t, points: pts, poseCount: opts?.extra ? 2 : 1 };
 }
 
@@ -43,6 +52,60 @@ function hold(eng: CoachEngine, t0: number, ms: number, sample: (t: number) => R
 }
 
 describe("CoachEngine", () => {
+  it.each([
+    { headDeg: 10 }, { shoulderDeg: 10 }, { torsoOffset: 0.16 },
+  ])("permits everyday movement previously outside the original band: %j", (movement) => {
+    const original = POSTURE_PRESETS.find((preset) => preset.id === "original")!;
+    for (const [settings, expected] of [[S, "in_range"], [{ ...S, ...original.values }, "change_detected"]] as const) {
+      const eng = new CoachEngine(settings);
+      eng.startSession(0);
+      eng.beginCalibration(0);
+      hold(eng, 0, 5000, (t) => pose(t));
+      expect(hold(eng, 5100, 800, (t) => pose(t, movement)).snap.state).toBe(expected);
+    }
+  });
+
+  it.each([
+    { headDeg: 20 }, { shoulderDeg: 20 }, { torsoOffset: 0.35 },
+  ])("still coaches large sustained changes: %j", (movement) => {
+    const eng = new CoachEngine(S);
+    eng.startSession(0);
+    eng.beginCalibration(0);
+    hold(eng, 0, 5000, (t) => pose(t));
+    const { snap } = hold(eng, 5100, 10500, (t) => pose(t, movement));
+    expect(snap.state).toBe("coaching");
+    expect(snap.coachingCount).toBe(1);
+  });
+
+  it("recovers without forcing the user back to the old narrow band", () => {
+    const eng = new CoachEngine(S);
+    eng.startSession(0);
+    eng.beginCalibration(0);
+    hold(eng, 0, 5000, (t) => pose(t));
+    hold(eng, 5100, 10500, (t) => pose(t, { headDeg: 20 }));
+    const { snap } = hold(eng, 15700, 3500, (t) => pose(t, { headDeg: 7 }));
+    expect(snap.state).toBe("in_range");
+    expect(snap.recoveryCount).toBe(1);
+  });
+
+  it("clears old measurements and pause state when starting again", () => {
+    const eng = new CoachEngine(S);
+    eng.startSession(0);
+    eng.beginCalibration(0);
+    hold(eng, 0, 5000, (t) => pose(t));
+    hold(eng, 5100, 10500, (t) => pose(t, { headDeg: 20 }));
+    eng.pause(16000);
+    const snap = eng.startSession(0);
+    expect(snap.state).toBe("ready");
+    expect(snap.metrics).toBeNull();
+    expect(snap.deltas).toBeNull();
+    expect(snap.baseline).toBeNull();
+    expect(snap.changeKind).toBeNull();
+    expect(eng.pausedAt).toBeNull();
+    eng.beginCalibration(0);
+    expect(hold(eng, 0, 5000, (t) => pose(t)).snap.state).toBe("in_range");
+  });
+
   it("registers a baseline after 5s of valid frames", () => {
     const eng = new CoachEngine(S);
     eng.startSession(0);
