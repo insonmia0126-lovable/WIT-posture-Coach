@@ -254,9 +254,7 @@ export class CoachEngine {
       if (this.calibrationStableMs >= this.settings.calibrationMs) {
         const base = baselineFromFrames(this.calibFrames);
         if (!base) {
-          this.message = "유효한 자세가 부족합니다. 얼굴과 어깨가 보이게 다시 등록하세요.";
-          this.state = "ready";
-          this.pushEvent(t);
+          this.message = "등록 시간은 채웠습니다. 기준 계산에 필요한 인식 결과를 조금 더 모으고 있습니다.";
           return this.snapshot(t);
         }
         this.baseline = base;

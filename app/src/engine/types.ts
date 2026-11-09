@@ -42,6 +42,7 @@ export type Baseline = {
 export type CoachSettings = {
   cameraPosition: CameraPosition;
   calibrationMs: number;
+  pauseWhenHidden: boolean;
   autoResumeOnReturn: boolean;
   smoothingMs: number;
   sustainMs: number;
@@ -61,17 +62,18 @@ export type CoachSettings = {
 export const DEFAULT_SETTINGS: CoachSettings = {
   cameraPosition: "front",
   calibrationMs: 7000,
+  pauseWhenHidden: false,
   autoResumeOnReturn: true,
   smoothingMs: 120,
   sustainMs: 20000,
   repeatAlertMs: 180000,
   recoveryMs: 3000,
-  headEnterDeg: 12,
+  headEnterDeg: 14,
   headExitDeg: 9,
-  shoulderEnterDeg: 12,
+  shoulderEnterDeg: 14,
   shoulderExitDeg: 9,
-  torsoEnter: 0.2,
-  torsoExit: 0.15,
+  torsoEnter: 0.22,
+  torsoExit: 0.14,
   minVisibility: 0.55,
   inferEveryMs: 80,
   demoShortDurations: false,

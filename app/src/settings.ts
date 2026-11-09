@@ -9,12 +9,16 @@ const STORAGE_KEY = "wit.posture-tolerance.local.v1";
 
 export const POSTURE_PRESETS: { id: string; label: string; values: Tolerance }[] = [
   {
-    id: "original", label: "기존",
+    id: "original", label: "기존 (v0.2)",
     values: { headEnterDeg: 8, headExitDeg: 5, shoulderEnterDeg: 8, shoulderExitDeg: 5, torsoEnter: 0.12, torsoExit: 0.08 },
   },
   {
-    id: "relaxed", label: "여유 (기본)",
+    id: "relaxed", label: "여유",
     values: { headEnterDeg: 12, headExitDeg: 9, shoulderEnterDeg: 12, shoulderExitDeg: 9, torsoEnter: 0.2, torsoExit: 0.15 },
+  },
+  {
+    id: "desk", label: "업무 (기본)",
+    values: { headEnterDeg: 14, headExitDeg: 9, shoulderEnterDeg: 14, shoulderExitDeg: 9, torsoEnter: 0.22, torsoExit: 0.14 },
   },
   {
     id: "spacious", label: "넉넉",
@@ -32,6 +36,7 @@ export function loadSettings(): CoachSettings {
     const defaults: CoachSettings = {
       ...DEFAULT_SETTINGS,
       cameraPosition: isCameraPosition(saved?.cameraPosition) ? saved.cameraPosition : DEFAULT_SETTINGS.cameraPosition,
+      pauseWhenHidden: typeof saved?.pauseWhenHidden === "boolean" ? saved.pauseWhenHidden : DEFAULT_SETTINGS.pauseWhenHidden,
       autoResumeOnReturn: typeof saved?.autoResumeOnReturn === "boolean" ? saved.autoResumeOnReturn : DEFAULT_SETTINGS.autoResumeOnReturn,
       smoothingMs: [0, 120, 250].includes(saved?.smoothingMs) ? saved.smoothingMs : DEFAULT_SETTINGS.smoothingMs,
     };
@@ -53,6 +58,7 @@ export function saveSettings(settings: CoachSettings) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       ...Object.fromEntries(TOLERANCE_KEYS.map((key) => [key, settings[key]])),
       cameraPosition: settings.cameraPosition,
+      pauseWhenHidden: settings.pauseWhenHidden,
       autoResumeOnReturn: settings.autoResumeOnReturn,
       smoothingMs: settings.smoothingMs,
     }));

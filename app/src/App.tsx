@@ -76,9 +76,9 @@ export default function App() {
   const lastInfer = useRef(0);
   const fpsWindow = useRef<number[]>([]);
   const loopRef = useRef(0);
+  const loopTimer = useRef(0);
   const t0 = useRef(performance.now());
   const demoT0 = useRef(0);
-  const hiddenRef = useRef(false);
   const landmarksRef = useRef(true);
   const demoRef = useRef(false);
   const cameraSessionRef = useRef(0);
@@ -87,7 +87,9 @@ export default function App() {
   const bindVideo = useCallback((video: HTMLVideoElement | null) => {
     videoRef.current = video;
     if (video && streamRef.current) {
-      video.srcObject = streamRef.current;
+      if (video.srcObject !== streamRef.current) video.srcObject = streamRef.current;
+      video.muted = true;
+      video.playsInline = true;
       void video.play().catch(() => {});
     }
   }, []);
@@ -103,11 +105,13 @@ export default function App() {
 
   useEffect(() => {
     const onVis = () => {
-      hiddenRef.current = document.hidden;
       if (!sessionActiveRef.current) return;
-      if (document.hidden && engine.state !== "paused") {
+      if (document.hidden && engine.settings.pauseWhenHidden && engine.state !== "paused") {
         setSnap(engine.pause(now(), "hidden"));
         setTabNotice("다른 탭·최소화 상태에서는 측정을 쉬며, 이 시간은 기록에서 제외됩니다.");
+      } else if (document.hidden && !engine.settings.pauseWhenHidden) {
+        const el = videoRef.current;
+        if (el && streamRef.current) void el.play().catch(() => {});
       } else if (!document.hidden && engine.state === "paused" && engine.pauseReason === "hidden") {
         if (settings.autoResumeOnReturn) {
           setSnap(engine.resume(now()));
@@ -120,7 +124,7 @@ export default function App() {
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, [engine, settings.autoResumeOnReturn]);
+  }, [engine, settings.autoResumeOnReturn, settings.pauseWhenHidden]);
 
   function now() {
     return performance.now() - t0.current;
@@ -131,6 +135,10 @@ export default function App() {
       setSnap(engine.setCameraPosition(next.cameraPosition, now()));
     }
     engine.settings = { ...next, ...(demoRef.current ? DEMO_SHORT_SETTINGS : {}) };
+    if (!next.pauseWhenHidden && engine.pauseReason === "hidden") {
+      setSnap(engine.resume(now()));
+      setTabNotice("");
+    }
     setSettings(next);
   }
 
@@ -179,7 +187,7 @@ export default function App() {
 
   async function startWebcam() {
     const sessionId = ++cameraSessionRef.current;
-    cancelAnimationFrame(loopRef.current);
+    stopLoop();
     stopCameraTracks();
     sessionActiveRef.current = true;
     setTabNotice("");
@@ -212,7 +220,7 @@ export default function App() {
 
   async function startDemo() {
     const sessionId = ++cameraSessionRef.current;
-    cancelAnimationFrame(loopRef.current);
+    stopLoop();
     stopCameraTracks();
     sessionActiveRef.current = true;
     setTabNotice("");
@@ -239,57 +247,94 @@ export default function App() {
     await modelTask;
   }
 
-  function startLoop(isDemo: boolean) {
+  function stopLoop() {
     cancelAnimationFrame(loopRef.current);
-    // Session time starts at zero again; never compare it with the previous session's clock.
+    window.clearInterval(loopTimer.current);
+    loopTimer.current = 0;
+  }
+
+  function startLoop(isDemo: boolean) {
+    stopLoop();
+    // Session-relative time must never be compared with the previous session.
     lastInfer.current = -Infinity;
     inferLock.current = false;
     fpsWindow.current = [];
-    hiddenRef.current = document.hidden;
-    if (document.hidden && engine.state !== "paused") setSnap(engine.pause(now(), "hidden"));
     setInferFps(0);
-    const tick = () => {
-      // Queue first so a failed inference cannot permanently stop the animation loop.
-      loopRef.current = requestAnimationFrame(tick);
-      const v = videoRef.current;
+    if (document.hidden && engine.settings.pauseWhenHidden && engine.state !== "paused") {
+      setSnap(engine.pause(now(), "hidden"));
+    }
+    let lastPoints: ReturnType<typeof simulatedPose>["points"] | null = null;
+    let lastFrameCount = -1;
+    const overlay = () => {
       const c = canvasRef.current;
+      if (c) drawOverlay(c, videoRef.current, lastPoints, landmarksRef.current, engine.settings.cameraPosition, engine.settings.minVisibility);
+    };
+    const tick = () => {
+      const v = videoRef.current;
       const t = now();
-      if (engine.state !== "paused" && !hiddenRef.current) {
-        if (!inferLock.current && t - lastInfer.current >= engine.settings.inferEveryMs) {
+      try {
+        if (document.hidden && engine.settings.pauseWhenHidden && engine.state !== "paused") {
+          setSnap(engine.pause(t, "hidden"));
+        }
+        if (engine.state !== "paused" && !inferLock.current && t - lastInfer.current >= engine.settings.inferEveryMs) {
           inferLock.current = true;
           lastInfer.current = t;
           try {
-            let points = null;
             const liveReady = Boolean(v && landmarkerRef.current && v.readyState >= 2 && v.videoWidth > 0);
-            if (liveReady && v && landmarkerRef.current) {
-              const frame = detectPose(landmarkerRef.current, v, performance.now());
-              setCamStatus("");
-              points = frame.points;
-              setSnap(engine.feed({ t, points: frame.points, poseCount: frame.poseCount }, frame.inferMs));
-            } else if (isDemo) {
+            const decoded = v ? (v as HTMLVideoElement & { webkitDecodedFrameCount?: number }).webkitDecodedFrameCount : undefined;
+            const frameMoved = decoded == null || decoded !== lastFrameCount;
+            if (decoded != null) lastFrameCount = decoded;
+            if (liveReady && v && landmarkerRef.current && frameMoved) {
+              try {
+                const frame = detectPose(landmarkerRef.current, v, performance.now());
+                lastPoints = frame.points;
+                setCamStatus("");
+                setSnap(engine.feed({ t, points: frame.points, poseCount: frame.poseCount }, frame.inferMs));
+              } catch {
+                lastPoints = null;
+                const broken = landmarkerRef.current;
+                landmarkerRef.current = null;
+                modelPromise.current = null;
+                setModelReady(false);
+                setCamStatus("자세 인식기를 다시 연결하는 중입니다.");
+                try { broken?.close(); } catch { /* Already closed. */ }
+                void ensureModel().catch(() => {});
+              }
+            } else if (isDemo && !liveReady) {
               const sim = simulatedPose(performance.now() - demoT0.current);
-              points = sim.points;
+              lastPoints = sim.points;
               setSnap(engine.feed({ t, points: sim.points, poseCount: 1 }, 4));
             }
             fpsWindow.current.push(performance.now());
             fpsWindow.current = fpsWindow.current.filter((x) => performance.now() - x < 1000);
             setInferFps(fpsWindow.current.length);
-            if (c) drawOverlay(c, v, points, landmarksRef.current, engine.settings.cameraPosition, engine.settings.minVisibility);
-          } catch {
-            setCamStatus("자세 인식을 다시 시도하는 중입니다. 계속되면 종료 후 웹캠을 다시 시작해 주세요.");
           } finally {
             inferLock.current = false;
           }
         }
+        if (streamRef.current && v && v.srcObject !== streamRef.current) attachStream(streamRef.current);
+        overlay();
+      } catch {
+        // One failed frame must not stop the session timer.
       }
     };
-    loopRef.current = requestAnimationFrame(tick);
+    const draw = () => {
+      loopRef.current = requestAnimationFrame(draw);
+      overlay();
+    };
+    // Preserve the upstream timer loop; animation frames stop in hidden tabs.
+    loopTimer.current = window.setInterval(tick, Math.max(200, engine.settings.inferEveryMs));
+    loopRef.current = requestAnimationFrame(draw);
   }
 
   function stopCameraTracks() {
     streamRef.current?.getTracks().forEach((tr) => tr.stop());
     streamRef.current = null;
-    if (videoRef.current) videoRef.current.srcObject = null;
+    const el = videoRef.current;
+    if (el) {
+      el.pause();
+      el.srcObject = null;
+    }
   }
 
   function endSession() {
@@ -297,7 +342,7 @@ export default function App() {
     setTabNotice("");
     cameraSessionRef.current += 1;
     demoRef.current = false;
-    cancelAnimationFrame(loopRef.current);
+    stopLoop();
     stopCameraTracks();
     const s = engine.snapshot(now());
     const kindCounts = { head: 0, shoulder: 0, torso: 0 };
@@ -391,12 +436,12 @@ export default function App() {
 
       {view !== "start" && (
         <>
-          <header className="row" style={{ justifyContent: "space-between", marginBottom: 12 }}>
+          <header className="topbar">
             <div>
               <div className="kicker">목격자 W.I.T · v{APP_VERSION}</div>
               <strong>당신의 자세 변화를 살피는 개인 코치</strong>
             </div>
-            <div className="row">
+            <nav className="nav">
               <button type="button" onClick={() => setView("settings")}>
                 설정
               </button>
@@ -409,13 +454,12 @@ export default function App() {
               <button type="button" onClick={() => setView("learning")}>
                 학습 기록
               </button>
-            </div>
+            </nav>
           </header>
         </>
       )}
 
-      {(view === "live" || view === "settings") && (
-        <div style={{ display: view === "live" ? "block" : "none" }}>
+      <div style={{ display: view === "live" ? "block" : "none" }} aria-hidden={view !== "live"}>
           {demo && (
             <div className="banner-sim">시연 모드 · 웹캠 실시간 미리보기 · 단축 타이머 · 실측 기록과 섞지 않음</div>
           )}
@@ -424,7 +468,9 @@ export default function App() {
             카메라 위치를 바꾸면 새 위치에서 기준을 다시 등록하세요.
           </p>
           <div className="notice" role="status" style={{ marginBottom: 12 }}>
-            {snap.pauseReason === "manual" ? "사용자가 일시정지했습니다. 탭으로 돌아와도 자동 재개하지 않습니다. 측정 재개를 눌러 주세요." : tabNotice || (settings.autoResumeOnReturn
+            {snap.pauseReason === "manual" ? "사용자가 일시정지했습니다. 탭으로 돌아와도 자동 재개하지 않습니다. 측정 재개를 눌러 주세요." : tabNotice || (!settings.pauseWhenHidden
+              ? "탭 전환·최소화 중에도 측정을 시도합니다. 브라우저의 절전·카메라 제한으로 인식이 중단될 수 있습니다. 설정에서 탭을 벗어나면 일시정지하도록 선택할 수 있습니다."
+              : settings.autoResumeOnReturn
               ? "탭을 바꾸거나 최소화하면 측정을 쉬고, 돌아오면 자동 재개합니다. 계속 측정하려면 이 화면을 다른 작업 창 옆에 띄워 두세요."
               : "탭을 바꾸거나 최소화하면 측정을 쉽니다. 돌아온 뒤 측정 재개를 눌러 주세요.")}
           </div>
@@ -557,8 +603,7 @@ export default function App() {
               )}
             </div>
           </div>
-        </div>
-      )}
+      </div>
 
       {view === "settings" && (
         <SettingsPanel
@@ -680,11 +725,11 @@ function StartScreen({
   onRefreshCams: () => void;
 }) {
   return (
-    <div>
+    <div className="hero">
       <p className="kicker">온디바이스 · 영상 외부 전송 없음</p>
       <h1>목격자 W.I.T</h1>
-      <p className="kicker">v{APP_VERSION} · 노트북 웹캠 프로토타입</p>
-      <p style={{ fontSize: "1.2rem" }}>당신의 자세 변화를 살피는 개인 코치</p>
+      <p className="kicker">v{APP_VERSION} · 노트북 웹캠</p>
+      <p className="lede">당신의 자세 변화를 살피는 개인 코치</p>
       <p className="notice">
         카메라 프레임과 좌표는 이 브라우저에서만 처리합니다. 영상과 사진은 저장하지 않습니다. 결과 기록은
         사용자 브라우저(localStorage)에만 남습니다. 같은 주소를 여러 사람이 동시에 열어도 각자 기기에서
@@ -781,16 +826,24 @@ function SettingsPanel({
   onDevice: (id: string) => void;
   onBack: () => void;
 }) {
-  const set = (k: keyof CoachSettings, v: number | boolean) => onChange({ ...settings, [k]: v });
+  const set = (k: keyof CoachSettings, v: number | boolean) => {
+    if (typeof v === "number" && !Number.isFinite(v)) return;
+    onChange({ ...settings, [k]: v });
+  };
   return (
     <div className="card">
       <button type="button" onClick={onBack} style={{ marginBottom: 12 }}>돌아가기</button>
       <h2>시제품 설정</h2>
       <label className="field">
-        탭 복귀 시 자동 재개
-        <input type="checkbox" checked={settings.autoResumeOnReturn} onChange={(event) => set("autoResumeOnReturn", event.target.checked)} />
+        탭을 벗어나면 일시정지
+        <input type="checkbox" checked={settings.pauseWhenHidden} onChange={(event) => set("pauseWhenHidden", event.target.checked)} />
       </label>
-      <p className="muted">직접 누른 일시정지는 자동으로 풀리지 않습니다. 숨겨진 탭·최소화 중에는 분석하지 않으며 카메라 연결은 유지합니다.</p>
+      <p className="muted">기본은 탭 전환·최소화 중에도 측정 유지입니다. 브라우저 제한으로 새 영상이 없으면 그 시간은 유효한 자세 측정으로 계산하지 않습니다.</p>
+      <label className="field">
+        탭 복귀 시 자동 재개
+        <input type="checkbox" disabled={!settings.pauseWhenHidden} checked={settings.autoResumeOnReturn} onChange={(event) => set("autoResumeOnReturn", event.target.checked)} />
+      </label>
+      <p className="muted">탭을 벗어나면 일시정지를 선택했을 때 적용합니다. 카메라 연결은 유지하며, 직접 누른 일시정지는 자동으로 풀리지 않습니다.</p>
       <label className="field">
         판정값 흔들림 완화
         <select value={settings.smoothingMs} onChange={(event) => set("smoothingMs", Number(event.target.value))}>
@@ -896,7 +949,7 @@ function PersonCard({
   return (
     <div className="card" style={{ margin: "1rem 0" }}>
       <p className="kicker">개인 아이디</p>
-      <p style={{ fontSize: "1.6rem", fontWeight: 700, letterSpacing: "0.04em", margin: "0.2rem 0" }}>{person.id}</p>
+      <p className="person-id">{person.id}</p>
       <p className="muted">이 브라우저에 부여된 아이디입니다. 측정 이력은 이 아이디로만 이 기기에 남습니다.</p>
       <div className="row">
         <label>

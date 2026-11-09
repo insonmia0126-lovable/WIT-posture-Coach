@@ -20,6 +20,15 @@ function engine(calibrationMs = 1000) {
 }
 
 describe("stable calibration time", () => {
+  it("keeps collecting when a short timer finishes before eight frames are available", () => {
+    const coach = engine(1200);
+    for (let t = 0; t <= 1200; t += 200) coach.feed(sample(t));
+    expect(coach.state).toBe("calibrating");
+    expect(coach.calibrationStableMs).toBe(1200);
+    expect(coach.feed(sample(1400)).state).toBe("in_range");
+    expect(coach.baseline).not.toBeNull();
+  });
+
   it("does not register from a few good frames followed by a long unseen gap", () => {
     const coach = engine(7000);
     for (let t = 0; t <= 700; t += 100) coach.feed(sample(t));

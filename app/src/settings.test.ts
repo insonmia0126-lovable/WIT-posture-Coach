@@ -14,10 +14,13 @@ function storage() {
 }
 
 describe("local posture tolerance", () => {
-  it("starts with relaxed tolerance without changing alert timing", () => {
+  it("preserves upstream desk-work defaults and alert timing", () => {
     storage();
     const settings = loadSettings();
-    expect(selectedPosturePreset(settings)).toBe("relaxed");
+    expect(selectedPosturePreset(settings)).toBe("desk");
+    expect(settings.pauseWhenHidden).toBe(false);
+    expect(settings.headEnterDeg).toBe(14);
+    expect(settings.torsoEnter).toBe(0.22);
     expect(settings.sustainMs).toBe(20000);
     expect(settings.repeatAlertMs).toBe(180000);
   });
@@ -60,8 +63,8 @@ describe("local posture tolerance", () => {
 
   it("persists automatic return and smoothing independently of tolerance", () => {
     storage();
-    saveSettings({ ...DEFAULT_SETTINGS, autoResumeOnReturn: false, smoothingMs: 250 });
-    expect(loadSettings()).toMatchObject({ autoResumeOnReturn: false, smoothingMs: 250 });
+    saveSettings({ ...DEFAULT_SETTINGS, pauseWhenHidden: true, autoResumeOnReturn: false, smoothingMs: 250 });
+    expect(loadSettings()).toMatchObject({ pauseWhenHidden: true, autoResumeOnReturn: false, smoothingMs: 250 });
     saveSettings({ ...DEFAULT_SETTINGS, smoothingMs: 0 });
     expect(loadSettings().smoothingMs).toBe(0);
   });
